@@ -46,6 +46,7 @@ class _ProposalScreenState extends State<ProposalScreen> {
     }
 
     final count = prefs.getInt('proposal_count') ?? 0;
+    final tone = prefs.getString('proposal_tone') ?? 'Professional';
     final recentJson = prefs.getString('recent_proposals');
     List<Map<String, String>> recent = [];
     if (recentJson != null) {
@@ -60,6 +61,7 @@ class _ProposalScreenState extends State<ProposalScreen> {
       _savedApiKey = apiKey;
       _isKeySaved = apiKey != null && apiKey.isNotEmpty;
       _proposalCount = count;
+      _selectedTone = tone;
       _recentProposals = recent;
     });
   }
@@ -424,7 +426,11 @@ class _ProposalScreenState extends State<ProposalScreen> {
                   child: ChoiceChip(
                     label: Text(tone),
                     selected: isSelected,
-                    onSelected: (v) => setState(() => _selectedTone = tone),
+                    onSelected: (v) async {
+                      setState(() => _selectedTone = tone);
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setString('proposal_tone', tone);
+                    },
                     backgroundColor: const Color(0xFF0A0F1E),
                     selectedColor: const Color(0xFF3B82F6),
                     labelStyle: TextStyle(color: isSelected ? Colors.white : const Color(0xFF9CA3AF), fontSize: 12, fontWeight: FontWeight.w600),

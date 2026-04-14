@@ -1,13 +1,18 @@
+import 'dart:convert';
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter_animate/flutter_animate.dart';
+
 import '../../core/models/order.dart';
 import '../proposals/proposal_screen.dart';
 import '../clients/clients_screen.dart';
 import '../earnings/earnings_screen.dart';
 import '../settings/settings_screen.dart';
-
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -17,18 +22,46 @@ class OrdersScreen extends StatefulWidget {
 }
 
 class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMixin {
-  late List<Order> _orders;
+  late List<Order> _orders = [];
   String _selectedFilter = 'All';
   final List<String> _filters = ['All', 'New', 'In Progress', 'Revision', 'Delivered', 'Completed'];
   late AnimationController _urgentPulseController;
   int _bottomNavIndex = 0;
 
+  // Controllers for the add order dialog
+  final _titleCtrl = TextEditingController();
+  final _clientCtrl = TextEditingController();
+  final _priceCtrl = TextEditingController();
+  final _notesCtrl = TextEditingController();
+  Platform _selectedPlatform = Platform.fiverr;
+  DateTime _selectedDeadline = DateTime.now().add(const Duration(days: 3));
+
   @override
   void initState() {
     super.initState();
-    _orders = [
+    _urgentPulseController = AnimationController(
+      duration: const Duration(seconds: 2),
+      vsync: this,
+    );
+    _urgentPulseController.repeat(reverse: true);
+    _initOrders();
+  }
+
+  Future<void> _initOrders() async {
+    final saved = await _loadOrders();
+    if (saved.isEmpty) {
+      final dummy = _getDummyOrders();
+      setState(() => _orders = dummy);
+      await _saveOrders();
+    } else {
+      setState(() => _orders = saved);
+    }
+  }
+
+  List<Order> _getDummyOrders() {
+    return [
       Order(
-        id: '1',
+        id: 'seed_1',
         title: 'Mobile App UI Design',
         clientName: 'John Doe',
         platform: Platform.fiverr,
@@ -39,7 +72,7 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
         createdAt: DateTime.now().subtract(const Duration(days: 1)),
       ),
       Order(
-        id: '2',
+        id: 'seed_2',
         title: 'Website Development',
         clientName: 'Jane Smith',
         platform: Platform.upwork,
@@ -50,7 +83,7 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
         createdAt: DateTime.now().subtract(const Duration(days: 3)),
       ),
       Order(
-        id: '3',
+        id: 'seed_3',
         title: 'Logo Animation',
         clientName: 'Alex Johnson',
         platform: Platform.fiverr,
@@ -61,7 +94,7 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
         createdAt: DateTime.now().subtract(const Duration(days: 2)),
       ),
       Order(
-        id: '4',
+        id: 'seed_4',
         title: 'SEO Audit',
         clientName: 'Sarah Miller',
         platform: Platform.direct,
@@ -72,7 +105,7 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
         createdAt: DateTime.now().subtract(const Duration(days: 5)),
       ),
       Order(
-        id: '5',
+        id: 'seed_5',
         title: 'Social Media Graphics',
         clientName: 'Chris Brown',
         platform: Platform.upwork,
@@ -82,71 +115,80 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
         notes: 'Create 10 Instagram post templates.',
         createdAt: DateTime.now().subtract(const Duration(days: 7)),
       ),
-      Order(
-        id: '6',
-        title: 'Content Writing',
-        clientName: 'Emily Davis',
-        platform: Platform.fiverr,
-        price: 150.0,
-        deadline: DateTime.now().add(const Duration(hours: 18)),
-        status: OrderStatus.inProgress,
-        notes: 'Write 3 articles about healthy lifestyle.',
-        createdAt: DateTime.now().subtract(const Duration(hours: 5)),
-      ),
-      Order(
-        id: '7',
-        title: 'Icon Set Design',
-        clientName: 'John Doe',
-        platform: Platform.fiverr,
-        price: 120.0,
-        deadline: DateTime.now().add(const Duration(days: 3)),
-        status: OrderStatus.completed,
-        notes: 'Create 20 custom icons for a fintech app.',
-        createdAt: DateTime.now().subtract(const Duration(days: 4)),
-      ),
-      Order(
-        id: '8',
-        title: 'WordPress Plugin Fix',
-        clientName: 'Jane Smith',
-        platform: Platform.upwork,
-        price: 200.0,
-        deadline: DateTime.now().add(const Duration(days: 1)),
-        status: OrderStatus.completed,
-        notes: 'Fix a conflict between two plugins.',
-        createdAt: DateTime.now().subtract(const Duration(days: 6)),
-      ),
     ];
+  }
 
-    _urgentPulseController = AnimationController(
-      duration: const Duration(milliseconds: 1200),
-      vsync: this,
-    )..repeat(reverse: true);
+  Future<void> _saveOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = jsonEncode(_orders.map((o) => {
+      'id': o.id,
+      'title': o.title,
+      'clientName': o.clientName,
+      'platform': o.platform.index,
+      'price': o.price,
+      'deadline': o.deadline.toIso8601String(),
+      'status': o.status.index,
+      'notes': o.notes,
+      'createdAt': o.createdAt.toIso8601String(),
+    }).toList());
+    await prefs.setString('orderflow_orders', jsonStr);
+  }
+
+  Future<List<Order>> _loadOrders() async {
+    final prefs = await SharedPreferences.getInstance();
+    final jsonStr = prefs.getString('orderflow_orders');
+    if (jsonStr == null || jsonStr.isEmpty) return [];
+    try {
+      final List<dynamic> list = jsonDecode(jsonStr);
+      return list.map((e) => Order(
+        id: e['id'],
+        title: e['title'],
+        clientName: e['clientName'],
+        platform: Platform.values[e['platform']],
+        price: (e['price'] as num).toDouble(),
+        deadline: DateTime.parse(e['deadline']),
+        status: OrderStatus.values[e['status']],
+        notes: e['notes'] ?? '',
+        createdAt: DateTime.parse(e['createdAt']),
+      )).toList();
+    } catch (e) {
+      return [];
+    }
   }
 
   @override
   void dispose() {
     _urgentPulseController.dispose();
+    _titleCtrl.dispose();
+    _clientCtrl.dispose();
+    _priceCtrl.dispose();
+    _notesCtrl.dispose();
     super.dispose();
   }
 
   List<Order> get _filteredOrders {
-    if (_selectedFilter == 'All') return _orders;
-    return _orders.where((order) => order.status.label == _selectedFilter).toList();
+    final filtered = _selectedFilter == 'All' 
+        ? _orders 
+        : _orders.where((order) => order.status.label == _selectedFilter).toList();
+    // Sort by createdAt descending
+    final sorted = List<Order>.from(filtered);
+    sorted.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return sorted;
   }
 
-  void _deleteOrder(String id) {
-    setState(() {
-      _orders.removeWhere((order) => order.id == id);
-    });
+  void _deleteOrder(Order order) async {
+    setState(() => _orders.removeWhere((o) => o.id == order.id));
+    await _saveOrders();
   }
 
-  void _completeOrder(String id) {
-    setState(() {
-      final index = _orders.indexWhere((order) => order.id == id);
-      if (index != -1) {
-        _orders[index] = _orders[index].copyWith(status: OrderStatus.completed);
-      }
-    });
+  void _completeOrder(Order order) async {
+    final index = _orders.indexWhere((o) => o.id == order.id);
+    if (index != -1) {
+      setState(() {
+        _orders[index].status = OrderStatus.completed;
+      });
+      await _saveOrders();
+    }
   }
 
   Widget _getBody() {
@@ -177,9 +219,62 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: _getBody(),
+      body: Stack(
+        children: [
+          _buildMeshGradient(),
+          _getBody(),
+        ],
+      ),
       floatingActionButton: _bottomNavIndex == 0 ? _buildFAB() : null,
       bottomNavigationBar: _buildBottomNav(),
+    );
+  }
+
+  Widget _buildMeshGradient() {
+    return Positioned.fill(
+      child: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF030712),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -100,
+              right: -100,
+              child: Container(
+                width: 400,
+                height: 400,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF3B82F6).withAlpha(40),
+                ),
+              ).animate(onPlay: (controller) => controller.repeat()).blur(begin: const Offset(100, 100), end: const Offset(100, 100)).move(
+                    begin: const Offset(-50, -50),
+                    end: const Offset(50, 50),
+                    duration: 10.seconds,
+                    curve: Curves.easeInOut,
+                  ),
+            ),
+            Positioned(
+              bottom: -150,
+              left: -100,
+              child: Container(
+                width: 500,
+                height: 500,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: const Color(0xFF6366F1).withAlpha(30),
+                ),
+              ).animate(onPlay: (controller) => controller.repeat()).blur(begin: const Offset(120, 120), end: const Offset(120, 120)).move(
+                    begin: const Offset(50, 50),
+                    end: const Offset(-50, -50),
+                    duration: 12.seconds,
+                    curve: Curves.easeInOut,
+                  ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -246,20 +341,17 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
     final dueTodayCount = _orders.where((o) => o.deadline.day == now.day && o.deadline.month == now.month).length;
 
     return SliverAppBar(
-      expandedHeight: 200,
+      expandedHeight: 240,
       collapsedHeight: 80,
       pinned: true,
+      backgroundColor: Colors.transparent,
       flexibleSpace: FlexibleSpaceBar(
-        background: Stack(
-          children: [
-            // Grid dot pattern background
-            Positioned.fill(
-              child: CustomPaint(
-                painter: GridDotPainter(),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 60, 24, 20),
+        background: ClipRect(
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+            child: Container(
+              color: const Color(0xFF030712).withAlpha(100),
+              padding: const EdgeInsets.fromLTRB(24, 70, 24, 20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -272,15 +364,17 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
                           children: [
                             Text(
                               'Good morning',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
                               style: GoogleFonts.inter(
-                                fontSize: 32,
-                                fontWeight: FontWeight.w700,
+                                fontSize: 36,
+                                fontWeight: FontWeight.w900,
                                 color: Colors.white,
+                                letterSpacing: -1,
                               ),
-                            ),
-                            Text(dateStr, style: Theme.of(context).textTheme.bodyMedium),
+                            ).animate().fadeIn(duration: 800.ms).slideX(begin: -0.1),
+                            const SizedBox(height: 4),
+                            Text(dateStr, style: GoogleFonts.inter(fontSize: 14, color: const Color(0xFF94A3B8), fontWeight: FontWeight.w400))
+                                .animate()
+                                .fadeIn(delay: 200.ms),
                           ],
                         ),
                       ),
@@ -288,52 +382,55 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          IconButton(
-                            onPressed: () {},
-                            icon: const Icon(Icons.notifications_none_outlined, color: Color(0xFF9CA3AF)),
-                          ),
-                          const SizedBox(width: 8),
-                          Stack(
-                            children: [
-                              const CircleAvatar(
-                                radius: 18,
-                                backgroundColor: Color(0xFF1A2235),
-                                child: Text('JD', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                              ),
-                              Positioned(
-                                right: 0,
-                                bottom: 0,
-                                child: Container(
-                                  width: 10,
-                                  height: 10,
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF10B981),
-                                    shape: BoxShape.circle,
-                                    border: Border.all(color: const Color(0xFF0A0F1E), width: 2),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
+                          _buildHeaderIcon(Icons.notifications_none_outlined),
+                          const SizedBox(width: 12),
+                          _buildProfileAvatar(),
                         ],
-                      ),
+                      ).animate().fadeIn(delay: 400.ms).scale(),
                     ],
                   ),
                   const Spacer(),
                   Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                    spacing: 10,
+                    runSpacing: 10,
                     children: [
                       _buildMiniStat('Earned \$${totalEarnings.toInt()}', const Color(0xFF10B981)),
                       _buildMiniStat('$activeOrdersCount Active', const Color(0xFF3B82F6)),
                       _buildMiniStat('$dueTodayCount Due today', const Color(0xFFEF4444)),
                     ],
-                  ),
+                  ).animate().fadeIn(delay: 600.ms).slideY(begin: 0.2),
                 ],
               ),
             ),
-          ],
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildHeaderIcon(IconData icon) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(10),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.white.withAlpha(15)),
+      ),
+      child: Icon(icon, color: const Color(0xFF94A3B8), size: 22),
+    );
+  }
+
+  Widget _buildProfileAvatar() {
+    return Container(
+      padding: const EdgeInsets.all(2),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: const Color(0xFF3B82F6), width: 2),
+      ),
+      child: const CircleAvatar(
+        radius: 18,
+        backgroundColor: Color(0xFF1E293B),
+        child: Text('JD', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900)),
       ),
     );
   }
@@ -382,38 +479,45 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
 
   Widget _buildStatCard(String label, String value, Color color, IconData icon) {
     return Expanded(
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 120),
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A2235),
-          borderRadius: BorderRadius.circular(16),
-          border: Border(top: BorderSide(color: color, width: 3)),
-          boxShadow: [
-            BoxShadow(
-              color: color.withAlpha(20),
-              blurRadius: 15,
-              offset: const Offset(0, 4),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 120),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: color.withAlpha(15),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: Colors.white.withAlpha(15), width: 1),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withAlpha(30),
+                  blurRadius: 40,
+                  spreadRadius: -10,
+                  offset: const Offset(0, 10),
+                ),
+              ],
             ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withAlpha(30),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: color, size: 18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: color.withAlpha(40),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                const SizedBox(height: 16),
+                Text(value, style: GoogleFonts.inter(fontSize: 26, fontWeight: FontWeight.w900, color: Colors.white, height: 1.2)),
+                const SizedBox(height: 6),
+                Text(label, style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF94A3B8), fontWeight: FontWeight.w400, height: 1.2)),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(value, style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w700, color: Colors.white, height: 1.2)),
-            const SizedBox(height: 4),
-            Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF9CA3AF), fontWeight: FontWeight.w500, height: 1.2)),
-          ],
+          ),
         ),
       ),
     );
@@ -469,20 +573,10 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
         delegate: SliverChildBuilderDelegate(
           (context, index) {
             final order = orders[index];
-            return TweenAnimationBuilder<double>(
-              duration: Duration(milliseconds: 400 + (index * 80)),
-              tween: Tween(begin: 0, end: 1),
-              builder: (context, value, child) {
-                return Opacity(
-                  opacity: value,
-                  child: Transform.translate(
-                    offset: Offset(0, 30 * (1 - value)),
-                    child: child,
-                  ),
-                );
-              },
-              child: _buildOrderCard(order),
-            );
+            return _buildOrderCard(order)
+                .animate(delay: (index * 100).ms)
+                .fadeIn(duration: 600.ms, curve: Curves.easeOut)
+                .slideY(begin: 0.2, end: 0, duration: 600.ms, curve: Curves.easeOutQuart);
           },
           childCount: orders.length,
         ),
@@ -494,106 +588,158 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
     final now = DateTime.now();
     final difference = order.deadline.difference(now);
     final isUrgent = difference.inHours < 24 && difference.inHours > 0;
-    final deadlineStr = difference.inHours < 24 ? '${difference.inHours}h left' : '${difference.inDays}d left';
-    final timeAgo = '2h ago'; // Dummy
+    final deadlineStr = difference.isNegative ? 'Overdue' : (difference.inHours < 24 ? '${difference.inHours}h left' : '${difference.inDays}d left');
+    final timeAgo = _getTimeAgo(order.createdAt);
+    final ValueNotifier<bool> isHovered = ValueNotifier(false);
 
     return MouseRegion(
       cursor: SystemMouseCursors.click,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        margin: const EdgeInsets.only(bottom: 16),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A2235),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF1E2D45)),
-        ),
-        child: Slidable(
-          key: ValueKey(order.id),
-          endActionPane: ActionPane(
-            motion: const ScrollMotion(),
-            children: [
-              SlidableAction(
-                onPressed: (_) => _completeOrder(order.id),
-                backgroundColor: const Color(0xFF10B981),
-                foregroundColor: Colors.white,
-                icon: Icons.check,
-                borderRadius: const BorderRadius.only(topRight: Radius.circular(16), bottomRight: Radius.circular(16)),
-              ),
-            ],
-          ),
-          child: InkWell(
-            onTap: () => _showOrderDetails(order),
-            borderRadius: BorderRadius.circular(16),
-            child: Row(
-              children: [
-                _buildStatusIndicator(order.status.textColor, isUrgent),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(16.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: ValueListenableBuilder<bool>(
+        valueListenable: isHovered,
+        builder: (context, hovered, child) {
+          return FocusableActionDetector(
+            onShowHoverHighlight: (hover) => isHovered.value = hover,
+            child: AnimatedScale(
+              scale: hovered ? 1.02 : 1.0,
+              duration: 200.ms,
+              curve: Curves.easeOutBack,
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withAlpha(50),
+                      blurRadius: 40,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(24),
+                  child: BackdropFilter(
+                    filter: ImageFilter.blur(sigmaX: 8, sigmaY: 8),
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withAlpha(10),
+                        borderRadius: BorderRadius.circular(24),
+                        border: Border.all(color: Colors.white.withAlpha(20), width: 1),
+                      ),
+                      child: Slidable(
+                        key: ValueKey(order.id),
+                        endActionPane: ActionPane(
+                          motion: const ScrollMotion(),
                           children: [
-                            Expanded(
-                              child: Text(
-                                order.title,
-                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.white),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                            SlidableAction(
+                              onPressed: (_) => _completeOrder(order),
+                              backgroundColor: const Color(0xFF10B981).withAlpha(200),
+                              foregroundColor: Colors.white,
+                              icon: Icons.check,
                             ),
-                            const SizedBox(width: 12),
-                            Text('\$${order.price.toInt()}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF3B82F6))),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        Row(
+                        startActionPane: ActionPane(
+                          motion: const ScrollMotion(),
                           children: [
-                            CircleAvatar(
-                              radius: 16,
-                              backgroundColor: order.platform.bgColor.withAlpha(40),
-                              child: Text(
-                                order.clientName[0],
-                                style: TextStyle(color: order.platform.textColor, fontSize: 12, fontWeight: FontWeight.bold),
-                              ),
+                            SlidableAction(
+                              onPressed: (_) => _deleteOrder(order),
+                              backgroundColor: const Color(0xFFEF4444).withAlpha(200),
+                              foregroundColor: Colors.white,
+                              icon: Icons.delete,
                             ),
-                            const SizedBox(width: 10),
-                            _buildPlatformBadge(order.platform),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                order.clientName,
-                                style: const TextStyle(fontSize: 13, color: Color(0xFF9CA3AF)),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                            const SizedBox(width: 6),
-                            const Text('•', style: TextStyle(color: Color(0xFF4B5563))),
-                            const SizedBox(width: 6),
-                            Text(timeAgo, style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563))),
                           ],
                         ),
-                        const SizedBox(height: 16),
-                        Row(
-                          children: [
-                            _buildDeadlineChip(deadlineStr, isUrgent ? const Color(0xFFEF4444) : const Color(0xFF9CA3AF)),
-                            const SizedBox(width: 8),
-                            _buildStatusChip(order.status),
-                          ],
+                        child: InkWell(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            _showOrderDetails(order);
+                          },
+                          borderRadius: BorderRadius.circular(24),
+                          child: Row(
+                            children: [
+                              _buildStatusIndicator(order.status.textColor, isUrgent),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(20.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          Expanded(
+                                            child: Text(
+                                              order.title,
+                                              style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w900, color: Colors.white),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Text('\$${order.price.toInt()}', style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w900, color: const Color(0xFF3B82F6))),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 14),
+                                      Row(
+                                        children: [
+                                          CircleAvatar(
+                                            radius: 14,
+                                            backgroundColor: order.platform.bgColor.withAlpha(40),
+                                            child: Text(
+                                              order.clientName.isNotEmpty ? order.clientName[0] : '?',
+                                              style: TextStyle(color: order.platform.textColor, fontSize: 10, fontWeight: FontWeight.w800),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          _buildPlatformBadge(order.platform),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Text(
+                                              order.clientName,
+                                              style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF94A3B8), fontWeight: FontWeight.w400),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 6),
+                                          const Text('•', style: TextStyle(color: Color(0xFF475569))),
+                                          const SizedBox(width: 6),
+                                          Text(timeAgo, style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF475569), fontWeight: FontWeight.w400)),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 18),
+                                      Row(
+                                        children: [
+                                          _buildDeadlineChip(deadlineStr, isUrgent ? const Color(0xFFEF4444) : const Color(0xFF94A3B8)),
+                                          const SizedBox(width: 10),
+                                          _buildStatusChip(order.status),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
+  }
+
+  String _getTimeAgo(DateTime dateTime) {
+    final diff = DateTime.now().difference(dateTime);
+    if (diff.inDays > 0) return '${diff.inDays}d ago';
+    if (diff.inHours > 0) return '${diff.inHours}h ago';
+    if (diff.inMinutes > 0) return '${diff.inMinutes}m ago';
+    return 'now';
   }
 
   Widget _buildStatusIndicator(Color color, bool isUrgent) {
@@ -719,13 +865,12 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
   }
 
   void _showAddOrderDialog() {
-    final titleController = TextEditingController();
-    final clientController = TextEditingController();
-    final priceController = TextEditingController();
-    final notesController = TextEditingController();
-    Platform selectedPlatform = Platform.fiverr;
-    OrderStatus selectedStatus = OrderStatus.newOrder;
-    DateTime selectedDate = DateTime.now().add(const Duration(days: 1));
+    _titleCtrl.clear();
+    _clientCtrl.clear();
+    _priceCtrl.clear();
+    _notesCtrl.clear();
+    _selectedPlatform = Platform.fiverr;
+    _selectedDeadline = DateTime.now().add(const Duration(days: 3));
 
     showModalBottomSheet(
       context: context,
@@ -746,66 +891,68 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
               children: [
                 Text('New Order', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
                 const SizedBox(height: 24),
-                _buildTextField(titleController, 'Order Title'),
+                _buildTextField(_titleCtrl, 'Order Title'),
                 const SizedBox(height: 16),
-                _buildTextField(clientController, 'Client Name'),
+                _buildTextField(_clientCtrl, 'Client Name'),
                 const SizedBox(height: 16),
                 Row(
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<Platform>(
-                        value: selectedPlatform,
+                        initialValue: _selectedPlatform,
                         dropdownColor: const Color(0xFF111827),
                         decoration: _inputDecoration('Platform'),
                         items: Platform.values.map((p) => DropdownMenuItem(value: p, child: Text(p.label, style: const TextStyle(color: Colors.white)))).toList(),
-                        onChanged: (v) => setModalState(() => selectedPlatform = v!),
+                        onChanged: (v) => setModalState(() => _selectedPlatform = v!),
                       ),
                     ),
                     const SizedBox(width: 16),
-                    Expanded(child: _buildTextField(priceController, 'Price (\$)', isNumber: true)),
+                    Expanded(child: _buildTextField(_priceCtrl, 'Price (\$)', isNumber: true)),
                   ],
                 ),
                 const SizedBox(height: 16),
-                DropdownButtonFormField<OrderStatus>(
-                  value: selectedStatus,
-                  dropdownColor: const Color(0xFF111827),
-                  decoration: _inputDecoration('Status'),
-                  items: OrderStatus.values.map((s) => DropdownMenuItem(value: s, child: Text(s.label, style: const TextStyle(color: Colors.white)))).toList(),
-                  onChanged: (v) => setModalState(() => selectedStatus = v!),
-                ),
-                const SizedBox(height: 16),
-                _buildTextField(notesController, 'Notes', maxLines: 3),
+                _buildTextField(_notesCtrl, 'Notes', maxLines: 3),
                 const SizedBox(height: 16),
                 ListTile(
                   title: const Text('Deadline', style: TextStyle(fontSize: 14, color: Color(0xFF9CA3AF))),
-                  subtitle: Text(DateFormat('MMM d, yyyy').format(selectedDate), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                  subtitle: Text(DateFormat('MMM d, yyyy').format(_selectedDeadline), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
                   trailing: const Icon(Icons.calendar_today_outlined, color: Color(0xFF3B82F6), size: 20),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: const BorderSide(color: Color(0xFF1E2D45))),
                   onTap: () async {
-                    final picked = await showDatePicker(context: context, initialDate: selectedDate, firstDate: DateTime.now(), lastDate: DateTime.now().add(const Duration(days: 365)));
-                    if (picked != null) setModalState(() => selectedDate = picked);
+                    final picked = await showDatePicker(
+                      context: context, 
+                      initialDate: _selectedDeadline, 
+                      firstDate: DateTime.now(), 
+                      lastDate: DateTime.now().add(const Duration(days: 365))
+                    );
+                    if (picked != null) setModalState(() => _selectedDeadline = picked);
                   },
                 ),
                 const SizedBox(height: 32),
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton(
-                    onPressed: () {
-                      if (titleController.text.isNotEmpty && clientController.text.isNotEmpty) {
-                        final newOrder = Order(
-                          id: DateTime.now().toString(),
-                          title: titleController.text,
-                          clientName: clientController.text,
-                          platform: selectedPlatform,
-                          price: double.tryParse(priceController.text) ?? 0.0,
-                          deadline: selectedDate,
-                          status: selectedStatus,
-                          notes: notesController.text,
-                          createdAt: DateTime.now(),
-                        );
-                        setState(() => _orders.insert(0, newOrder));
-                        Navigator.pop(context);
+                    onPressed: () async {
+                      if (_titleCtrl.text.trim().isEmpty || _clientCtrl.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Title and client name required!')));
+                        return;
                       }
+                      final newOrder = Order(
+                        id: DateTime.now().millisecondsSinceEpoch.toString(),
+                        title: _titleCtrl.text.trim(),
+                        clientName: _clientCtrl.text.trim(),
+                        platform: _selectedPlatform,
+                        price: double.tryParse(_priceCtrl.text) ?? 0.0,
+                        deadline: _selectedDeadline,
+                        status: OrderStatus.newOrder,
+                        notes: _notesCtrl.text.trim(),
+                        createdAt: DateTime.now(),
+                      );
+                      
+                      setState(() => _orders.add(newOrder));
+                      await _saveOrders();
+                      if (context.mounted) Navigator.pop(context);
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF3B82F6),
@@ -839,46 +986,12 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
   InputDecoration _inputDecoration(String label) {
     return InputDecoration(
       labelText: label,
-      labelStyle: const TextStyle(color: Color(0xFF9CA3AF)),
+      labelStyle: const TextStyle(color: Color(0xFF94A3B8)),
       filled: true,
-      fillColor: const Color(0xFF0A0F1E),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF1E2D45))),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF3B82F6))),
+      fillColor: const Color(0xFF030712),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF1E293B))),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: const BorderSide(color: Color(0xFF3B82F6))),
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     );
   }
-}
-
-class GridDotPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = const Color(0xFF1E2D45).withAlpha(100)
-      ..strokeWidth = 1;
-
-    const double spacing = 20;
-    for (double x = 0; x < size.width; x += spacing) {
-      for (double y = 0; y < size.height; y += spacing) {
-        canvas.drawCircle(Offset(x, y), 1, paint);
-      }
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
-
-class HeaderClipper extends CustomClipper<Path> {
-  @override
-  Path getClip(Size size) {
-    Path path = Path();
-    path.lineTo(0, size.height);
-    path.lineTo(size.width, size.height);
-    path.lineTo(size.width, 0);
-    path.close();
-    return path;
-  }
-
-  @override
-  bool shouldReclip(CustomClipper<Path> oldClipper) => false;
 }

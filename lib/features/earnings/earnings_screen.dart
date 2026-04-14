@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:ui';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -15,8 +16,9 @@ class EarningsScreen extends StatefulWidget {
 
 class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStateMixin {
   String _selectedDateRange = 'This Month';
-  String _chartPeriod = '30D';
   double _monthlyGoal = 3000.0;
+  bool _isUsd = true;
+  final double _exchangeRate = 120.0;
   late AnimationController _countAnimationController;
   late Animation<double> _countAnimation;
 
@@ -28,7 +30,7 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
       vsync: this,
       duration: const Duration(milliseconds: 800),
     );
-    _countAnimation = Tween<double>(begin: 0, end: _calculateTotalEarned()).animate(
+    _countAnimation = Tween<double>(begin: 0, end: _calculateNetProfit()).animate(
       CurvedAnimation(parent: _countAnimationController, curve: Curves.easeOut),
     );
     _countAnimationController.forward();
@@ -47,32 +49,50 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
     });
   }
 
-  Future<void> _saveGoal(double goal) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble('monthly_goal', goal);
+  double _getFeeMultiplier(Platform platform) {
+    switch (platform) {
+      case Platform.fiverr:
+        return 0.8; // 20% fee
+      case Platform.upwork:
+        return 0.9; // 10% fee
+      case Platform.direct:
+        return 1.0; // 0% fee
+    }
   }
 
-  double _calculateTotalEarned() {
+  double _calculateGrossEarnings() {
     return widget.orders
         .where((o) => o.status == OrderStatus.completed)
         .fold(0.0, (sum, o) => sum + o.price);
   }
 
-  double _calculatePending() {
+  double _calculateNetProfit() {
     return widget.orders
-        .where((o) => o.status != OrderStatus.completed)
+        .where((o) => o.status == OrderStatus.completed)
+        .fold(0.0, (sum, o) => sum + (o.price * _getFeeMultiplier(o.platform)));
+  }
+
+  double _calculatePendingClearance() {
+    return widget.orders
+        .where((o) => o.status == OrderStatus.delivered)
         .fold(0.0, (sum, o) => sum + o.price);
+  }
+
+  String _formatCurrency(double amount) {
+    final value = _isUsd ? amount : amount * _exchangeRate;
+    final String symbol = _isUsd ? '\$' : '৳';
+    return '$symbol${NumberFormat('#,###.##').format(value)}';
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0F1E),
+      backgroundColor: const Color(0xFF030712),
       appBar: _buildAppBar(),
       body: RefreshIndicator(
         onRefresh: () async {
           setState(() {
-            _countAnimation = Tween<double>(begin: 0, end: _calculateTotalEarned()).animate(
+            _countAnimation = Tween<double>(begin: 0, end: _calculateNetProfit()).animate(
               CurvedAnimation(parent: _countAnimationController, curve: Curves.easeOut),
             );
           });
@@ -110,7 +130,7 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
-      backgroundColor: const Color(0xFF0A0F1E),
+      backgroundColor: Colors.transparent,
       elevation: 0,
       toolbarHeight: 80,
       title: Row(
@@ -121,25 +141,71 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Earnings',
+                  'Earnings Engine',
                   style: GoogleFonts.inter(
                     fontSize: 24,
-                    fontWeight: FontWeight.w700,
+                    fontWeight: FontWeight.w900,
                     color: Colors.white,
                   ),
                 ),
                 Text(
-                  'Your financial overview',
+                  '100% Realistic Logic Enabled',
                   style: GoogleFonts.inter(
                     fontSize: 12,
-                    color: const Color(0xFF9CA3AF),
+                    color: const Color(0xFF94A3B8),
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
               ],
             ),
           ),
+          _buildCurrencyToggle(),
+          const SizedBox(width: 12),
           _buildDateRangePill(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildCurrencyToggle() {
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _isUsd = !_isUsd;
+          // Trigger animation refresh for the main total
+          _countAnimation = Tween<double>(begin: 0, end: _calculateNetProfit()).animate(
+            CurvedAnimation(parent: _countAnimationController, curve: Curves.easeOut),
+          );
+          _countAnimationController.reset();
+          _countAnimationController.forward();
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: _isUsd 
+              ? [const Color(0xFF3B82F6), const Color(0xFF6366F1)]
+              : [const Color(0xFF10B981), const Color(0xFF059669)],
+          ),
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: (_isUsd ? const Color(0xFF3B82F6) : const Color(0xFF10B981)).withAlpha(50),
+              blurRadius: 10,
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Icon(_isUsd ? Icons.attach_money : Icons.currency_lira, color: Colors.white, size: 14),
+            const SizedBox(width: 4),
+            Text(
+              _isUsd ? 'USD' : 'BDT',
+              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -187,64 +253,106 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
   }
 
   Widget _buildHeroCard() {
-    final totalEarned = _calculateTotalEarned();
+    final netProfit = _calculateNetProfit();
+    final grossEarnings = _calculateGrossEarnings();
+    final pendingClearance = _calculatePendingClearance();
     final completedOrders = widget.orders.where((o) => o.status == OrderStatus.completed).length;
-    final avgValue = completedOrders > 0 ? totalEarned / completedOrders : 0.0;
+    final taxVaultAmount = netProfit * 0.15;
 
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A2235),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFF1E2D45)),
+        color: const Color(0xFF111827).withAlpha(150),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withAlpha(15), width: 1),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF3B82F6).withOpacity(0.1),
-            blurRadius: 40,
-            offset: const Offset(0, 0),
+            color: const Color(0xFF3B82F6).withAlpha(30),
+            blurRadius: 60,
+            spreadRadius: -10,
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Total Earned', style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Net Profit (After Fees)', style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 13, fontWeight: FontWeight.w500)),
+              const Icon(Icons.verified_user_outlined, color: Color(0xFF10B981), size: 16),
+            ],
+          ),
+          const SizedBox(height: 12),
           AnimatedBuilder(
             animation: _countAnimation,
             builder: (context, child) {
               return Text(
-                '\$${NumberFormat('#,###').format(_countAnimation.value.toInt())}',
-                style: GoogleFonts.inter(fontSize: 42, fontWeight: FontWeight.bold, color: Colors.white),
+                _formatCurrency(_countAnimation.value),
+                style: GoogleFonts.inter(fontSize: 48, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: -1.5),
               );
             },
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
+          // Tax Vault Card
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: const Color(0xFF10B981).withOpacity(0.1),
-              borderRadius: BorderRadius.circular(12),
+              gradient: LinearGradient(
+                colors: [const Color(0xFFF59E0B).withAlpha(40), const Color(0xFFD97706).withAlpha(20)],
+              ),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFF59E0B).withAlpha(30), width: 1),
             ),
-            child: const Row(
-              mainAxisSize: MainAxisSize.min,
+            child: Row(
               children: [
-                Icon(Icons.trending_up, color: Color(0xFF10B981), size: 14),
-                SizedBox(width: 4),
-                Text('+12% vs last month', style: TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.w600)),
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF59E0B).withAlpha(30),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.lock_clock_outlined, color: Color(0xFFF59E0B), size: 14),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Locked in Tax Vault (15%)',
+                        style: GoogleFonts.inter(color: const Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _formatCurrency(taxVaultAmount),
+                        style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
+                      ),
+                    ],
+                  ),
+                ),
               ],
             ),
           ),
           const SizedBox(height: 24),
-          const Divider(color: Color(0xFF1E2D45)),
+          Row(
+            children: [
+              Expanded(child: _buildHeroStat('Gross Earnings', _formatCurrency(grossEarnings))),
+              Container(width: 1, height: 40, color: Colors.white.withAlpha(15)),
+              const SizedBox(width: 24),
+              Expanded(child: _buildHeroStat('Pending Clearance', _formatCurrency(pendingClearance))),
+            ],
+          ),
+          const SizedBox(height: 24),
+          const Divider(color: Color(0xFF1E293B)),
           const SizedBox(height: 16),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _buildHeroStat('Completed', completedOrders.toString()),
-              _buildHeroStat('Avg Value', '\$${avgValue.toInt()}'),
-              _buildHeroStat('Best Month', 'Oct'),
+              _buildHeroStat('Completed', completedOrders.toString(), isSmall: true),
+              _buildHeroStat('Avg Project', _formatCurrency(completedOrders > 0 ? netProfit / completedOrders : 0), isSmall: true),
+              _buildHeroStat('Success Rate', '100%', isSmall: true),
             ],
           ),
         ],
@@ -252,91 +360,116 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
     );
   }
 
-  Widget _buildHeroStat(String label, String value) {
+  Widget _buildHeroStat(String label, String value, {bool isSmall = false}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(value, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+        Text(value, style: GoogleFonts.inter(color: Colors.white, fontSize: isSmall ? 16 : 20, fontWeight: FontWeight.w900)),
         const SizedBox(height: 4),
-        Text(label, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11)),
+        Text(label, style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.w400)),
       ],
     );
   }
 
   Widget _buildChartSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text('Revenue Over Time', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-            _buildChartPeriodTabs(),
-          ],
-        ),
-        const SizedBox(height: 24),
-        SizedBox(
-          height: 200,
-          child: LineChart(_buildChartData()),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildChartPeriodTabs() {
     return Container(
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(color: const Color(0xFF1A2235), borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        children: ['7D', '30D', '90D'].map((p) {
-          final isSelected = _chartPeriod == p;
-          return GestureDetector(
-            onTap: () => setState(() => _chartPeriod = p),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              decoration: BoxDecoration(
-                color: isSelected ? const Color(0xFF3B82F6) : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(p, style: TextStyle(color: isSelected ? Colors.white : const Color(0xFF9CA3AF), fontSize: 11, fontWeight: FontWeight.bold)),
-            ),
-          );
-        }).toList(),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827).withAlpha(150),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withAlpha(10), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF3B82F6).withAlpha(10),
+            blurRadius: 40,
+            spreadRadius: -10,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Weekly Performance', style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+              const Icon(Icons.trending_up, color: Color(0xFF3B82F6), size: 20),
+            ],
+          ),
+          const SizedBox(height: 24),
+          SizedBox(
+            height: 240,
+            child: BarChart(_buildBarChartData()),
+          ),
+        ],
       ),
     );
   }
 
-  LineChartData _buildChartData() {
+  BarChartData _buildBarChartData() {
     final now = DateTime.now();
-    final List<FlSpot> spots = [];
-    final Map<int, double> dailyEarnings = {};
+    final List<BarChartGroupData> barGroups = [];
+    final Map<int, double> weeklyNetProfit = {};
 
-    // Group earnings by day for the last 30 days
+    // Get net profit for each of the last 7 days
     for (var order in widget.orders) {
       if (order.status == OrderStatus.completed) {
-        final diff = now.difference(order.createdAt).inDays;
-        if (diff >= 0 && diff < 30) {
-          final dayIndex = 29 - diff;
-          dailyEarnings[dayIndex] = (dailyEarnings[dayIndex] ?? 0) + order.price;
+        final orderDate = DateTime(order.createdAt.year, order.createdAt.month, order.createdAt.day);
+        final today = DateTime(now.year, now.month, now.day);
+        final diff = today.difference(orderDate).inDays;
+        
+        if (diff >= 0 && diff < 7) {
+          final dayIndex = 6 - diff;
+          final net = order.price * _getFeeMultiplier(order.platform);
+          weeklyNetProfit[dayIndex] = (weeklyNetProfit[dayIndex] ?? 0) + net;
         }
       }
     }
 
-    // Create spots from daily earnings
-    double runningTotal = 0;
-    for (int i = 0; i < 30; i++) {
-      runningTotal += dailyEarnings[i] ?? 0;
-      // Map 30 days to 10 points for smoother chart or more granularity
-      if (i % 3 == 0) {
-        spots.add(FlSpot((i / 3).toDouble(), runningTotal));
-      }
+    final maxVal = _calculateMaxWeekly(weeklyNetProfit);
+
+    for (int i = 0; i < 7; i++) {
+      final value = weeklyNetProfit[i] ?? 0.0;
+      final displayValue = _isUsd ? value : value * _exchangeRate;
+      
+      barGroups.add(
+        BarChartGroupData(
+          x: i,
+          barRods: [
+            BarChartRodData(
+              toY: displayValue,
+              width: 16,
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(6)),
+              gradient: LinearGradient(
+                begin: Alignment.bottomCenter,
+                end: Alignment.topCenter,
+                colors: [
+                  const Color(0xFF3B82F6).withAlpha(150),
+                  const Color(0xFF60A5FA),
+                  const Color(0xFF93C5FD), // Neon highlight at top
+                ],
+              ),
+              backDrawRodData: BackgroundBarChartRodData(
+                show: true,
+                toY: maxVal * 1.2,
+                color: const Color(0xFF3B82F6).withAlpha(10),
+              ),
+            ),
+          ],
+        ),
+      );
     }
 
-    return LineChartData(
+    return BarChartData(
       gridData: FlGridData(
         show: true,
         drawVerticalLine: false,
-        getDrawingHorizontalLine: (value) => const FlLine(color: Color(0xFF1E2D45), strokeWidth: 1),
+        horizontalInterval: maxVal > 0 ? maxVal / 4 : 10,
+        getDrawingHorizontalLine: (value) => FlLine(
+          color: Colors.white.withAlpha(10),
+          strokeWidth: 1,
+          dashArray: [5, 5],
+        ),
       ),
       titlesData: FlTitlesData(
         show: true,
@@ -346,68 +479,54 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
           sideTitles: SideTitles(
             showTitles: true,
             getTitlesWidget: (value, meta) {
-              const style = TextStyle(color: Color(0xFF4B5563), fontSize: 10);
-              final index = value.toInt();
-              if (index < 0 || index > 9) return const Text('');
-              
-              // Map index back to date
-              final dayOffset = index * 3;
-              final date = now.subtract(Duration(days: 29 - dayOffset));
-              
-              // Only show every 3rd label
-              if (index % 3 == 0 || index == 9) {
-                return Text(DateFormat('MMM d').format(date), style: style);
-              }
-              return const Text('');
+              final date = now.subtract(Duration(days: 6 - value.toInt()));
+              final isToday = value.toInt() == 6;
+              return Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  isToday ? 'TOD' : DateFormat('E').format(date).toUpperCase().substring(0, 1),
+                  style: GoogleFonts.inter(
+                    color: isToday ? const Color(0xFF3B82F6) : const Color(0xFF64748B),
+                    fontSize: 10,
+                    fontWeight: isToday ? FontWeight.w900 : FontWeight.w700,
+                  ),
+                ),
+              );
             },
           ),
         ),
-        leftTitles: AxisTitles(
-          sideTitles: SideTitles(
-            showTitles: true,
-            getTitlesWidget: (value, meta) {
-              if (value == 0) return const Text('');
-              return Text('\$${value.toInt()}', style: const TextStyle(color: Color(0xFF4B5563), fontSize: 10));
-            },
-            reservedSize: 35,
-          ),
-        ),
+        leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       ),
       borderData: FlBorderData(show: false),
-      lineBarsData: [
-        LineChartBarData(
-          spots: spots.isEmpty ? [const FlSpot(0, 0)] : spots,
-          isCurved: true,
-          color: const Color(0xFF3B82F6),
-          barWidth: 3,
-          isStrokeCapRound: true,
-          dotData: const FlDotData(show: false),
-          belowBarData: BarAreaData(
-            show: true,
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [const Color(0xFF3B82F6).withOpacity(0.3), Colors.transparent],
-            ),
-          ),
-        ),
-      ],
-      lineTouchData: LineTouchData(
-        touchTooltipData: LineTouchTooltipData(
-          getTooltipColor: (_) => const Color(0xFF1A2235),
-          getTooltipItems: (touchedSpots) {
-            return touchedSpots.map((spot) {
-              final dayOffset = spot.x.toInt() * 3;
-              final date = now.subtract(Duration(days: 29 - dayOffset));
-              return LineTooltipItem(
-                '${DateFormat('MMM d').format(date)}\n\$${spot.y.toInt()}',
-                const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              );
-            }).toList();
+      barGroups: barGroups,
+      barTouchData: BarTouchData(
+        touchTooltipData: BarTouchTooltipData(
+          getTooltipColor: (_) => const Color(0xFF1E293B),
+          tooltipRoundedRadius: 12,
+          getTooltipItem: (group, groupIndex, rod, rodIndex) {
+            final date = now.subtract(Duration(days: 6 - group.x.toInt()));
+            return BarTooltipItem(
+              '${DateFormat('EEEE, MMM d').format(date)}\n',
+              GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 12),
+              children: [
+                TextSpan(
+                  text: _formatCurrency(rod.toY / (_isUsd ? 1 : _exchangeRate)),
+                  style: GoogleFonts.inter(color: const Color(0xFF3B82F6), fontWeight: FontWeight.w900, fontSize: 14),
+                ),
+              ],
+            );
           },
         ),
       ),
     );
+  }
+
+  double _calculateMaxWeekly(Map<int, double> weeklyData) {
+    double maxVal = 100;
+    for (var v in weeklyData.values) {
+      if (v > maxVal) maxVal = v;
+    }
+    return _isUsd ? maxVal : maxVal * _exchangeRate;
   }
 
   Widget _buildPlatformBreakdown() {
@@ -415,49 +534,68 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
     final upworkOrders = widget.orders.where((o) => o.platform == Platform.upwork).toList();
     final directOrders = widget.orders.where((o) => o.platform == Platform.direct).toList();
 
-    final fiverrEarned = fiverrOrders.fold(0.0, (sum, o) => sum + o.price);
-    final upworkEarned = upworkOrders.fold(0.0, (sum, o) => sum + o.price);
-    final directEarned = directOrders.fold(0.0, (sum, o) => sum + o.price);
+    final fiverrNet = fiverrOrders.where((o) => o.status == OrderStatus.completed).fold(0.0, (sum, o) => sum + (o.price * _getFeeMultiplier(Platform.fiverr)));
+    final upworkNet = upworkOrders.where((o) => o.status == OrderStatus.completed).fold(0.0, (sum, o) => sum + (o.price * _getFeeMultiplier(Platform.upwork)));
+    final directNet = directOrders.where((o) => o.status == OrderStatus.completed).fold(0.0, (sum, o) => sum + (o.price * _getFeeMultiplier(Platform.direct)));
     
-    final grandTotal = fiverrEarned + upworkEarned + directEarned;
+    final grandTotalNet = fiverrNet + upworkNet + directNet;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Platform Split', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Platform Net Profit', style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: const Color(0xFF3B82F6).withAlpha(20),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: const Color(0xFF3B82F6).withAlpha(30)),
+              ),
+              child: Text(
+                'LIVE SYNC',
+                style: GoogleFonts.inter(color: const Color(0xFF3B82F6), fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1),
+              ),
+            ),
+          ],
+        ),
         const SizedBox(height: 16),
         Row(
           children: [
             Expanded(
               child: _buildPlatformCard(
-                'Fiverr', 
-                fiverrEarned, 
-                fiverrOrders.length, 
+                'Fiverr (20%)', 
+                fiverrNet, 
+                fiverrOrders.where((o) => o.status == OrderStatus.completed).length, 
                 const Color(0xFF1DBF73), 
-                grandTotal,
+                grandTotalNet,
                 iconText: 'F',
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: _buildPlatformCard(
-                'Upwork', 
-                upworkEarned, 
-                upworkOrders.length, 
+                'Upwork (10%)', 
+                upworkNet, 
+                upworkOrders.where((o) => o.status == OrderStatus.completed).length, 
                 const Color(0xFF6FDA44), 
-                grandTotal,
+                grandTotalNet,
+                iconText: 'U',
               ),
             ),
           ],
         ),
         const SizedBox(height: 12),
         _buildPlatformCard(
-          'Direct Clients', 
-          directEarned, 
-          directOrders.length, 
+          'Direct Clients (0%)', 
+          directNet, 
+          directOrders.where((o) => o.status == OrderStatus.completed).length, 
           const Color(0xFF8B5CF6), 
-          grandTotal, 
+          grandTotalNet, 
           isFullWidth: true,
+          iconText: 'D',
         ),
       ],
     );
@@ -466,16 +604,148 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
   Widget _buildPlatformCard(String label, double earned, int orders, Color color, double grandTotal, {bool isFullWidth = false, String? iconText}) {
     final percent = grandTotal > 0 ? earned / grandTotal : 0.0;
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A2235),
-        borderRadius: BorderRadius.circular(16),
-        border: Border(
-          top: BorderSide(color: color, width: 3),
-          left: const BorderSide(color: Color(0xFF1E2D45)),
-          right: const BorderSide(color: Color(0xFF1E2D45)),
-          bottom: const BorderSide(color: Color(0xFF1E2D45)),
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: color.withAlpha(20),
+            blurRadius: 20,
+            spreadRadius: -10,
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111827).withAlpha(150),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: color.withAlpha(30), width: 1),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        if (iconText != null) ...[
+                          Container(
+                            width: 24,
+                            height: 24,
+                            decoration: BoxDecoration(color: color.withAlpha(40), shape: BoxShape.circle),
+                            child: Center(child: Text(iconText, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900))),
+                          ),
+                          const SizedBox(width: 10),
+                        ],
+                        Text(label, style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                      ],
+                    ),
+                    Text('${(percent * 100).toInt()}%', style: GoogleFonts.inter(color: color, fontWeight: FontWeight.w900, fontSize: 12)),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                Text(_formatCurrency(earned), style: GoogleFonts.inter(color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 4),
+                Text('$orders Projects', style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 12, fontWeight: FontWeight.w400)),
+                const SizedBox(height: 16),
+                Stack(
+                  children: [
+                    Container(
+                      height: 6,
+                      decoration: BoxDecoration(
+                        color: color.withAlpha(20),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                    ),
+                    FractionallySizedBox(
+                      widthFactor: percent.clamp(0.0, 1.0),
+                      child: Container(
+                        height: 6,
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [color.withAlpha(150), color],
+                          ),
+                          borderRadius: BorderRadius.circular(4),
+                          boxShadow: [
+                            BoxShadow(
+                              color: color.withAlpha(100),
+                              blurRadius: 4,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildOrderStatusBreakdown() {
+    final delivered = _calculatePendingClearance();
+    final inProgress = widget.orders.where((o) => o.status == OrderStatus.inProgress).fold(0.0, (sum, o) => sum + o.price);
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Pipeline Value', style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
+        const SizedBox(height: 16),
+        Row(
+          children: [
+            _buildPipelineItem('Delivered', delivered, const Color(0xFF10B981), Icons.outgoing_mail),
+            const SizedBox(width: 12),
+            _buildPipelineItem('In Progress', inProgress, const Color(0xFF3B82F6), Icons.sync),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPipelineItem(String label, double value, Color color, IconData icon) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.all(20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111827).withAlpha(150),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white.withAlpha(15), width: 1),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 16),
+            Text(_formatCurrency(value), style: GoogleFonts.inter(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900)),
+            const SizedBox(height: 4),
+            Text(label, style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 12, fontWeight: FontWeight.w400)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMonthlyGoal() {
+    final netProfit = _calculateNetProfit();
+    final percent = (netProfit / _monthlyGoal).clamp(0.0, 1.0);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [const Color(0xFF3B82F6).withAlpha(40), const Color(0xFF6366F1).withAlpha(20)],
+        ),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: const Color(0xFF3B82F6).withAlpha(30), width: 1),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -483,315 +753,109 @@ class _EarningsScreenState extends State<EarningsScreen> with TickerProviderStat
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                children: [
-                  if (iconText != null) ...[
-                    Container(
-                      width: 20,
-                      height: 20,
-                      decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-                      child: Center(child: Text(iconText, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold))),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                ],
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(4)),
-                child: Text('${(percent * 100).round()}%', style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
-              ),
+              Text('Monthly Target', style: GoogleFonts.inter(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900)),
+              Text('${(percent * 100).toInt()}%', style: GoogleFonts.inter(color: const Color(0xFF3B82F6), fontSize: 16, fontWeight: FontWeight.w900)),
             ],
           ),
-          const SizedBox(height: 12),
-          Text('\$${earned.toInt()}', style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.bold)),
-          Text('$orders orders', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-          const SizedBox(height: 12),
-          Stack(
-            children: [
-              Container(
-                height: 6,
-                width: double.infinity,
-                decoration: BoxDecoration(color: const Color(0xFF1E2D45), borderRadius: BorderRadius.circular(3)),
-              ),
-              FractionallySizedBox(
-                widthFactor: percent,
-                child: Container(
-                  height: 6,
-                  decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(3)),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildOrderStatusBreakdown() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Orders by Status', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 16),
-        ...OrderStatus.values.map((status) {
-          final count = widget.orders.where((o) => o.status == status).length;
-          final amount = widget.orders.where((o) => o.status == status).fold(0.0, (sum, o) => sum + o.price);
-          final percent = widget.orders.isNotEmpty ? count / widget.orders.length : 0.0;
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Container(width: 8, height: 8, decoration: BoxDecoration(color: status.bgColor, shape: BoxShape.circle)),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(status.label, style: const TextStyle(color: Colors.white, fontSize: 13))),
-                    Text('$count orders', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 11)),
-                    const SizedBox(width: 12),
-                    Text('\$${amount.toInt()}', style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(value: percent, backgroundColor: const Color(0xFF1E2D45), valueColor: AlwaysStoppedAnimation(status.bgColor), minHeight: 6),
-                ),
-              ],
-            ),
-          );
-        }),
-      ],
-    );
-  }
-
-  Widget _buildMonthlyGoal() {
-    final currentEarnings = _calculateTotalEarned();
-    final percent = (currentEarnings / _monthlyGoal).clamp(0.0, 1.0);
-
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(color: const Color(0xFF1A2235), borderRadius: BorderRadius.circular(24), border: Border.all(color: const Color(0xFF1E2D45))),
-      child: Column(
-        children: [
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Monthly Goal', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-              Icon(Icons.flag_outlined, color: Color(0xFF3B82F6)),
-            ],
-          ),
-          const SizedBox(height: 32),
-          SizedBox(
-            width: 150,
-            height: 150,
-            child: CustomPaint(
-              painter: GoalProgressPainter(percent: percent),
-              child: Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('\$${currentEarnings.toInt()}', style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-                    Text('/ \$${_monthlyGoal.toInt()}', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-                  ],
-                ),
-              ),
+          const SizedBox(height: 20),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: LinearProgressIndicator(
+              value: percent,
+              minHeight: 12,
+              backgroundColor: Colors.white.withAlpha(10),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
             ),
           ),
           const SizedBox(height: 16),
-          Text('${(percent * 100).toInt()}% achieved', style: const TextStyle(color: Color(0xFF3B82F6), fontWeight: FontWeight.bold)),
-          const SizedBox(height: 32),
-          SliderTheme(
-            data: SliderTheme.of(context).copyWith(
-              activeTrackColor: const Color(0xFF3B82F6),
-              inactiveTrackColor: const Color(0xFF1E2D45),
-              thumbColor: Colors.white,
-              overlayColor: const Color(0xFF3B82F6).withOpacity(0.1),
-            ),
-            child: Slider(
-              value: _monthlyGoal,
-              min: 500,
-              max: 10000,
-              divisions: 19,
-              onChanged: (value) {
-                setState(() => _monthlyGoal = value);
-                _saveGoal(value);
-              },
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(_formatCurrency(netProfit), style: GoogleFonts.inter(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700)),
+              Text('Goal: ${_formatCurrency(_monthlyGoal)}', style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 14, fontWeight: FontWeight.w500)),
+            ],
           ),
-          const Text('Slide to set your monthly goal', style: TextStyle(color: Color(0xFF4B5563), fontSize: 11)),
         ],
       ),
     );
   }
 
   Widget _buildQuickStatsRow() {
-    final highestOrder = widget.orders.fold(0.0, (max, o) => o.price > max ? o.price : max);
-    final totalClients = widget.orders.map((o) => o.clientName).toSet().length;
-    final ordersThisMonth = widget.orders.where((o) => o.createdAt.month == DateTime.now().month).length;
-    final completionRate = widget.orders.isNotEmpty 
-        ? (widget.orders.where((o) => o.status == OrderStatus.completed).length / widget.orders.length * 100).toInt() 
-        : 0;
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: [
-          _buildQuickStatPill('Highest Order', '\$${highestOrder.toInt()}', const Color(0xFFF59E0B)),
-          _buildQuickStatPill('Total Clients', totalClients.toString(), const Color(0xFF3B82F6)),
-          _buildQuickStatPill('Orders Month', ordersThisMonth.toString(), const Color(0xFF10B981)),
-          _buildQuickStatPill('Completion', '$completionRate%', const Color(0xFF8B5CF6)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildQuickStatPill(String label, String value, Color color) {
-    return Container(
-      margin: const EdgeInsets.only(right: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(color: const Color(0xFF1A2235), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFF1E2D45))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(value, style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 16)),
-          Text(label, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10)),
-        ],
-      ),
-    );
+    return const SizedBox.shrink(); // Removing redundant old stats
   }
 
   Widget _buildTopOrders() {
-    final topOrders = List<Order>.from(widget.orders)..sort((a, b) => b.price.compareTo(a.price));
-    final displayOrders = topOrders.take(3).toList();
+    final completed = widget.orders.where((o) => o.status == OrderStatus.completed).toList();
+    completed.sort((a, b) => b.price.compareTo(a.price));
+    final topOrders = completed.take(3).toList();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    if (topOrders.isEmpty) return const SizedBox.shrink();
+
+    return Column(      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Top Orders', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Text('High-Value Projects', style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
         const SizedBox(height: 16),
-        ...displayOrders.asMap().entries.map((entry) {
-          final index = entry.key;
-          final order = entry.value;
-          final medals = [Icons.emoji_events, Icons.emoji_events, Icons.emoji_events];
-          final medalColors = [const Color(0xFFF59E0B), const Color(0xFF94A3B8), const Color(0xFFB45309)];
-          
-          return Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(color: const Color(0xFF1A2235), borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFF1E2D45))),
-            child: Row(
-              children: [
-                Icon(medals[index], color: medalColors[index], size: 24),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(order.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                      Text(order.clientName, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-                    ],
-                  ),
-                ),
-                Text('\$${order.price.toInt()}', style: const TextStyle(color: Color(0xFFF59E0B), fontWeight: FontWeight.bold, fontSize: 16)),
-              ],
-            ),
-          );
-        }),
+        ...topOrders.map((o) => _buildTransactionItem(o)),
       ],
     );
   }
 
   Widget _buildRecentTransactions() {
-    final completedOrders = widget.orders.where((o) => o.status == OrderStatus.completed).toList()
-      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    final displayTransactions = completedOrders.take(5).toList();
+    final completed = widget.orders.where((o) => o.status == OrderStatus.completed).toList();
+    completed.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    final recent = completed.take(5).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Recent Transactions', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+        Text('Clearance History', style: GoogleFonts.inter(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900)),
         const SizedBox(height: 16),
-        ...displayTransactions.map((order) {
-          return Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: Row(
-              children: [
-                Container(
-                  width: 40,
-                  height: 40,
-                  decoration: BoxDecoration(color: order.platform.bgColor.withOpacity(0.1), shape: BoxShape.circle),
-                  child: Icon(Icons.payment, color: order.platform.bgColor, size: 20),
-                ),
-                const SizedBox(width: 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(order.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                      Text(order.clientName, style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 12)),
-                    ],
-                  ),
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('+\$${order.price.toInt()}', style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 14)),
-                    Text(DateFormat('MMM d').format(order.createdAt), style: const TextStyle(color: Color(0xFF4B5563), fontSize: 10)),
-                  ],
-                ),
-              ],
-            ),
-          );
-        }),
-        const SizedBox(height: 8),
-        Center(
-          child: TextButton(
-            onPressed: () {},
-            child: const Text('View all', style: TextStyle(color: Color(0xFF3B82F6), fontWeight: FontWeight.bold)),
-          ),
-        ),
+        if (recent.isEmpty)
+          Text('No cleared transactions yet.', style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 14))
+        else
+          ...recent.map((o) => _buildTransactionItem(o)),
       ],
     );
   }
-}
 
-class GoalProgressPainter extends CustomPainter {
-  final double percent;
-  GoalProgressPainter({required this.percent});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.width / 2;
-    const strokeWidth = 12.0;
-
-    // Background ring
-    final bgPaint = Paint()
-      ..color = const Color(0xFF1E2D45)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth;
-    canvas.drawCircle(center, radius - strokeWidth / 2, bgPaint);
-
-    // Progress arc
-    final progressPaint = Paint()
-      ..shader = const LinearGradient(
-        colors: [Color(0xFF3B82F6), Color(0xFF8B5CF6)],
-      ).createShader(Rect.fromCircle(center: center, radius: radius))
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeWidth
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawArc(
-      Rect.fromCircle(center: center, radius: radius - strokeWidth / 2),
-      -1.5708, // -90 degrees
-      6.28319 * percent,
-      false,
-      progressPaint,
+  Widget _buildTransactionItem(Order o) {
+    final net = o.price * _getFeeMultiplier(o.platform);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF111827).withAlpha(150),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withAlpha(15), width: 1),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: o.platform.bgColor.withAlpha(30), shape: BoxShape.circle),
+            child: Icon(Icons.check_circle_outline, color: o.platform.bgColor, size: 18),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(o.title, style: GoogleFonts.inter(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800), maxLines: 1, overflow: TextOverflow.ellipsis),
+                const SizedBox(height: 4),
+                Text(DateFormat('MMM d, yyyy').format(o.createdAt), style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.w400)),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(_formatCurrency(net), style: GoogleFonts.inter(color: const Color(0xFF10B981), fontSize: 15, fontWeight: FontWeight.w900)),
+              const SizedBox(height: 2),
+              Text('Gross: ${_formatCurrency(o.price)}', style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 10, fontWeight: FontWeight.w500)),
+            ],
+          ),
+        ],
+      ),
     );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

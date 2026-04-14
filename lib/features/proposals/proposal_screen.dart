@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:intl/intl.dart';
@@ -24,12 +25,14 @@ class _ProposalScreenState extends State<ProposalScreen> {
   String _selectedTone = 'Professional';
   String? _generatedProposal;
   int _proposalCount = 0;
-  List<Map<String, String>> _recentProposals = [];
+  List<Map<dynamic, dynamic>> _recentProposals = [];
   final List<String> _tones = ['Professional', 'Friendly', 'Confident', 'Brief'];
+  late Box _proposalsBox;
 
   @override
   void initState() {
     super.initState();
+    _proposalsBox = Hive.box('proposals');
     _loadInitialData();
   }
 
@@ -47,15 +50,10 @@ class _ProposalScreenState extends State<ProposalScreen> {
 
     final count = prefs.getInt('proposal_count') ?? 0;
     final tone = prefs.getString('proposal_tone') ?? 'Professional';
-    final recentJson = prefs.getString('recent_proposals');
-    List<Map<String, String>> recent = [];
-    if (recentJson != null) {
-      final List<dynamic> decoded = jsonDecode(recentJson);
-      recent = decoded.map((e) {
-        final map = Map<String, dynamic>.from(e as Map);
-        return map.map((key, value) => MapEntry(key, value.toString()));
-      }).toList();
-    }
+    
+    // Load from Hive instead of SharedPreferences
+    final List<dynamic> history = _proposalsBox.get('history', defaultValue: []);
+    final recent = history.cast<Map<dynamic, dynamic>>();
 
     setState(() {
       _savedApiKey = apiKey;
@@ -97,7 +95,7 @@ class _ProposalScreenState extends State<ProposalScreen> {
           'content-type': 'application/json',
         },
         body: jsonEncode({
-          'model': 'claude-3-sonnet-20240229', // Updated to a real stable model name
+          'model': 'claude-3-sonnet-20240229',
           'max_tokens': 1024,
           'system': "You are an expert freelancer proposal writer with 10 years experience on Fiverr and Upwork. Write a short, personalized, human-sounding proposal based on the job description provided. Use a $_selectedTone tone. Be confident, specific, and results-focused. Keep it under 200 words. No generic openers like 'I am writing to apply'. Sound like a real human expert.",
           'messages': [
@@ -118,14 +116,23 @@ class _ProposalScreenState extends State<ProposalScreen> {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setInt('proposal_count', _proposalCount);
         
-        // Save to recent
+        // Save to recent in Hive
         final Map<String, String> newProposal = {
           'text': content,
           'date': DateFormat('MMM d, h:mm a').format(DateTime.now()),
+          'tone': _selectedTone,
         };
-        _recentProposals.insert(0, newProposal);
-        if (_recentProposals.length > 3) _recentProposals.removeLast();
-        await prefs.setString('recent_proposals', jsonEncode(_recentProposals));
+        
+        final List<dynamic> currentHistory = _proposalsBox.get('history', defaultValue: []);
+        final List<Map<dynamic, dynamic>> updatedHistory = List.from(currentHistory);
+        updatedHistory.insert(0, newProposal);
+        if (updatedHistory.length > 10) updatedHistory.removeLast();
+        
+        await _proposalsBox.put('history', updatedHistory);
+
+        setState(() {
+          _recentProposals = updatedHistory;
+        });
 
       } else if (response.statusCode == 401) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -163,9 +170,9 @@ class _ProposalScreenState extends State<ProposalScreen> {
           controller: controller,
           obscureText: true,
           style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
+          decoration: const InputDecoration(
             labelText: 'Anthropic API Key',
-            labelStyle: const TextStyle(color: Color(0xFF9CA3AF)),
+            labelStyle: TextStyle(color: Color(0xFF9CA3AF)),
             enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: Colors.white24)),
           ),
         ),
@@ -334,11 +341,11 @@ class _ProposalScreenState extends State<ProposalScreen> {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: const Color(0xFFFCD34D).withAlpha(50)),
                 ),
-                child: Row(
+                child: const Row(
                   children: [
-                    const Icon(Icons.lock_outline, color: Color(0xFFFCD34D), size: 20),
-                    const SizedBox(width: 12),
-                    const Expanded(
+                    Icon(Icons.lock_outline, color: Color(0xFFFCD34D), size: 20),
+                    SizedBox(width: 12),
+                    Expanded(
                       child: Text(
                         'Your key is stored only on your device. We never see or store it on any server.',
                         style: TextStyle(color: Color(0xFFFCD34D), fontSize: 12),
@@ -538,7 +545,7 @@ class _ProposalScreenState extends State<ProposalScreen> {
     );
   }
 
-  Widget _buildRecentItem(Map<String, String> proposal) {
+  Widget _buildRecentItem(Map<dynamic, dynamic> proposal) {
     final preview = proposal['text']!.length > 60 ? '${proposal['text']!.substring(0, 60)}...' : proposal['text']!;
     
     return Container(
@@ -557,7 +564,17 @@ class _ProposalScreenState extends State<ProposalScreen> {
               children: [
                 Text(preview, style: const TextStyle(color: Colors.white, fontSize: 13)),
                 const SizedBox(height: 8),
-                Text(proposal['date']!, style: const TextStyle(color: Color(0xFF4B5563), fontSize: 11)),
+                Row(
+                  children: [
+                    Text(proposal['date']!, style: const TextStyle(color: Color(0xFF4B5563), fontSize: 11)),
+                    if (proposal['tone'] != null) ...[
+                      const SizedBox(width: 8),
+                      const Text('•', style: TextStyle(color: Color(0xFF4B5563), fontSize: 11)),
+                      const SizedBox(width: 8),
+                      Text(proposal['tone']!, style: const TextStyle(color: Color(0xFF4B5563), fontSize: 11)),
+                    ],
+                  ],
+                ),
               ],
             ),
           ),

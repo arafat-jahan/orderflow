@@ -64,13 +64,16 @@ class OrderAdapter extends TypeAdapter<Order> {
       notes: fields[7] as String,
       createdAt: fields[8] as DateTime,
       milestones: (fields[9] as List?)?.cast<Milestone>(),
+      shareToken: fields[10] as String?,
+      deliveryUrl: fields[11] as String?,
+      isDeliveryLocked: fields[12] as bool,
     );
   }
 
   @override
   void write(BinaryWriter writer, Order obj) {
     writer
-      ..writeByte(10)
+      ..writeByte(13)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -90,7 +93,13 @@ class OrderAdapter extends TypeAdapter<Order> {
       ..writeByte(8)
       ..write(obj.createdAt)
       ..writeByte(9)
-      ..write(obj.milestones);
+      ..write(obj.milestones)
+      ..writeByte(10)
+      ..write(obj.shareToken)
+      ..writeByte(11)
+      ..write(obj.deliveryUrl)
+      ..writeByte(12)
+      ..write(obj.isDeliveryLocked);
   }
 
   @override

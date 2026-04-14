@@ -7,9 +7,17 @@ import 'package:orderflow/core/models/order.dart';
 import 'package:orderflow/core/models/client_profile.dart';
 import 'package:orderflow/core/models/invoice.dart';
 import 'package:orderflow/features/orders/orders_screen.dart';
+import 'package:orderflow/features/portal/client_portal_screen.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize Supabase
+  await Supabase.initialize(
+    url: 'https://your-project-url.supabase.co',
+    anonKey: 'your-anon-key',
+  );
   
   // Initialize Hive
   if (kIsWeb) {
@@ -95,7 +103,15 @@ class MyApp extends StatelessWidget {
           elevation: 0,
         ),
       ),
-      home: const OrdersScreen(),
+      onGenerateRoute: (settings) {
+        if (settings.name != null && settings.name!.startsWith('/portal/')) {
+          final token = settings.name!.replaceFirst('/portal/', '');
+          return MaterialPageRoute(
+            builder: (context) => ClientPortalScreen(token: token),
+          );
+        }
+        return MaterialPageRoute(builder: (context) => const OrdersScreen());
+      },
     );
   }
 }

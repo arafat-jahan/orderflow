@@ -3,21 +3,26 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter_slidable/flutter_slidable.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-
 import 'package:url_launcher/url_launcher.dart';
-
+import 'package:flutter_slidable/flutter_slidable.dart';
 import '../../core/models/order.dart';
 import '../../core/models/invoice.dart';
 import '../../core/services/invoice_service.dart';
 import '../proposals/proposal_screen.dart';
+import '../portal/client_portal_screen.dart';
 import '../clients/clients_screen.dart';
 import '../earnings/earnings_screen.dart';
 import '../settings/settings_screen.dart';
+
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:file_picker/file_picker.dart';
+import 'dart:io';
 
 class OrdersScreen extends StatefulWidget {
   const OrdersScreen({super.key});
@@ -695,6 +700,29 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
                                           _buildDeadlineChip(deadlineStr, isUrgent ? const Color(0xFFEF4444) : const Color(0xFF94A3B8)),
                                           const SizedBox(width: 10),
                                           _buildStatusChip(order.status),
+                                          const SizedBox(width: 10),
+                                          GestureDetector(
+                                            onTap: () {
+                                              HapticFeedback.mediumImpact();
+                                              _sharePortalLink(order);
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF6366F1).withAlpha(20),
+                                                borderRadius: BorderRadius.circular(10),
+                                                border: Border.all(color: const Color(0xFF6366F1).withAlpha(40)),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.share_outlined, size: 12, color: Color(0xFF6366F1)),
+                                                  const SizedBox(width: 6),
+                                                  Text('PORTAL', style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, color: const Color(0xFF6366F1), letterSpacing: 0.5)),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
                                           const Spacer(),
                                           Text('${(order.progress * 100).toInt()}%', style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF3B82F6), fontWeight: FontWeight.w900)),
                                         ],
@@ -826,102 +854,253 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
   }
 
   void _showOrderDetails(Order order) {
+    double uploadProgress = 0;
+    bool isUploading = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (context) => StatefulBuilder(
         builder: (context, setModalState) => Container(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.85,
+          ),
           decoration: const BoxDecoration(
             color: Color(0xFF111827),
             borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
           ),
-          padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Workflow Engine', style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white)),
-                  _buildProgressCircle(order.progress),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(order.title, style: GoogleFonts.inter(fontSize: 14, color: const Color(0xFF94A3B8))),
-              const SizedBox(height: 32),
-              
-              Text('MANUAL MILESTONES', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w900, color: const Color(0xFF4B5563), letterSpacing: 1.5)),
-              const SizedBox(height: 16),
-              ...order.milestones.asMap().entries.map((entry) {
-                final milestone = entry.value;
-                return Container(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    color: milestone.isCompleted ? const Color(0xFF3B82F6).withAlpha(10) : Colors.white.withAlpha(5),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: milestone.isCompleted ? const Color(0xFF3B82F6).withAlpha(30) : Colors.white.withAlpha(10)),
-                  ),
-                  child: CheckboxListTile(
-                    value: milestone.isCompleted,
-                    onChanged: (val) async {
-                      setModalState(() => milestone.isCompleted = val!);
-                      setState(() {}); // Update main screen
-                      await _saveOrders();
-                    },
-                    title: Text(milestone.title, style: GoogleFonts.inter(color: Colors.white, fontSize: 14, fontWeight: milestone.isCompleted ? FontWeight.w700 : FontWeight.w500)),
-                    activeColor: const Color(0xFF3B82F6),
-                    checkColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
-                  ),
-                );
-              }),
-              
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  onPressed: () => _sendUpdateToClient(order),
-                  icon: const Icon(Icons.send_rounded, size: 18),
-                  label: const Text('Send Update to Client',
-                      style: TextStyle(fontWeight: FontWeight.w800)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF3B82F6),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
-                    elevation: 0,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: () => _handleGenerateInvoice(order),
-                  icon: const Icon(Icons.description_outlined, size: 18),
-                  label: const Text('Generate & Preview Invoice',
-                      style: TextStyle(fontWeight: FontWeight.w800)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.white,
-                    side: const BorderSide(color: Color(0xFF3B82F6)),
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20)),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
+              // Drag Handle
               Center(
-                child: TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('Close Engine', style: GoogleFonts.inter(color: const Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                child: Container(
+                  margin: const EdgeInsets.only(top: 12),
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(20),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
                 ),
               ),
-              const SizedBox(height: 20),
+              Expanded(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Workflow Engine',
+                              style: GoogleFonts.inter(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white)),
+                          _buildProgressCircle(order.progress),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(order.title,
+                          style: GoogleFonts.inter(
+                              fontSize: 14, color: const Color(0xFF94A3B8))),
+                      const SizedBox(height: 32),
+                      Text('MANUAL MILESTONES',
+                          style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                              color: const Color(0xFF4B5563),
+                              letterSpacing: 1.5)),
+                      const SizedBox(height: 16),
+                      ...order.milestones.asMap().entries.map((entry) {
+                        final milestone = entry.value;
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: milestone.isCompleted
+                                ? const Color(0xFF3B82F6).withAlpha(10)
+                                : Colors.white.withAlpha(5),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                                color: milestone.isCompleted
+                                    ? const Color(0xFF3B82F6).withAlpha(30)
+                                    : Colors.white.withAlpha(10)),
+                          ),
+                          child: CheckboxListTile(
+                            value: milestone.isCompleted,
+                            onChanged: (val) async {
+                              setModalState(() => milestone.isCompleted = val!);
+                              setState(() {}); // Update main screen
+                              await _saveOrders();
+                            },
+                            title: Text(milestone.title,
+                                style: GoogleFonts.inter(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: milestone.isCompleted
+                                        ? FontWeight.w700
+                                        : FontWeight.w500)),
+                            activeColor: const Color(0xFF3B82F6),
+                            checkColor: Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16)),
+                            contentPadding:
+                                const EdgeInsets.symmetric(horizontal: 16),
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 32),
+                      Text('FINAL DELIVERY',
+                          style: GoogleFonts.inter(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w900,
+                              color: const Color(0xFF4B5563),
+                              letterSpacing: 1.5)),
+                      const SizedBox(height: 16),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(24),
+                        decoration: BoxDecoration(
+                          color: order.deliveryUrl != null
+                              ? const Color(0xFF10B981).withAlpha(10)
+                              : const Color(0xFF3B82F6).withAlpha(5),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(
+                              color: order.deliveryUrl != null
+                                  ? const Color(0xFF10B981).withAlpha(20)
+                                  : const Color(0xFF3B82F6).withAlpha(10)),
+                        ),
+                        child: Column(
+                          children: [
+                            if (isUploading) ...[
+                              CircularProgressIndicator(
+                                value: uploadProgress,
+                                backgroundColor: Colors.white.withAlpha(10),
+                                color: const Color(0xFF3B82F6),
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                '${(uploadProgress * 100).toInt()}% Uploading...',
+                                style: GoogleFonts.inter(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700),
+                              ),
+                            ] else ...[
+                              Icon(
+                                order.deliveryUrl != null
+                                    ? Icons.verified_user_outlined
+                                    : Icons.cloud_upload_outlined,
+                                color: order.deliveryUrl != null
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFF3B82F6),
+                                size: 32,
+                              ),
+                              const SizedBox(height: 16),
+                              Text(
+                                order.deliveryUrl != null
+                                    ? 'File Securely Stored'
+                                    : 'No delivery file uploaded',
+                                style: GoogleFonts.inter(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 14),
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                order.deliveryUrl != null
+                                    ? 'Client Portal is now locked for payment'
+                                    : 'Upload the final file for client to unlock',
+                                style: GoogleFonts.inter(
+                                    color: const Color(0xFF64748B),
+                                    fontSize: 12),
+                              ),
+                              const SizedBox(height: 20),
+                              ElevatedButton.icon(
+                                onPressed: isUploading
+                                    ? null
+                                    : () => _handleFileUpload(order, (p) {
+                                          setModalState(() {
+                                            uploadProgress = p;
+                                            isUploading = p < 1.0;
+                                          });
+                                        }),
+                                icon: Icon(order.deliveryUrl != null
+                                    ? Icons.check_circle_outline
+                                    : Icons.upload_file),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: order.deliveryUrl != null
+                                      ? const Color(0xFF10B981)
+                                      : const Color(0xFF3B82F6),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12)),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 24, vertical: 12),
+                                ),
+                                label: Text(
+                                    order.deliveryUrl != null
+                                        ? 'File Securely Stored'
+                                        : 'Upload Final File',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 32),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: () => _sendUpdateToClient(order),
+                          icon: const Icon(Icons.send_rounded, size: 18),
+                          label: const Text('Send Update to Client',
+                              style: TextStyle(fontWeight: FontWeight.w800)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF3B82F6),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20)),
+                            elevation: 0,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: () => _handleGenerateInvoice(order),
+                          icon:
+                              const Icon(Icons.description_outlined, size: 18),
+                          label: const Text('Generate & Preview Invoice',
+                              style: TextStyle(fontWeight: FontWeight.w800)),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.white,
+                            side: const BorderSide(color: Color(0xFF3B82F6)),
+                            padding: const EdgeInsets.symmetric(vertical: 18),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(20)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Center(
+                        child: TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: Text('Close Engine',
+                              style: GoogleFonts.inter(
+                                  color: const Color(0xFF64748B),
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -1150,6 +1329,91 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
           backgroundColor: Color(0xFF10B981),
         ),
       );
+    }
+  }
+
+  void _sharePortalLink(Order order) {
+    final url = "https://orderflow.io/portal/${order.shareToken}";
+    Clipboard.setData(ClipboardData(text: url));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Row(
+          children: [
+            const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Text('Portal link copied to clipboard!',
+                style: GoogleFonts.inter(fontWeight: FontWeight.w600)),
+          ],
+        ),
+        backgroundColor: const Color(0xFF6366F1),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(24),
+      ),
+    );
+  }
+
+  Future<void> _handleFileUpload(
+      Order order, Function(double) onProgress) async {
+    final result = await FilePicker.platform.pickFiles();
+
+    if (result != null) {
+      final file = File(result.files.single.path!);
+      final fileName =
+          '${order.id}_${DateTime.now().millisecondsSinceEpoch}_${result.files.single.name}';
+
+      try {
+        // Start simulated progress since Supabase Storage doesn't provide upload progress in the simple upload method
+        double progress = 0;
+        final timer =
+            Stream.periodic(const Duration(milliseconds: 100), (i) => i)
+                .take(20)
+                .listen((event) {
+          progress += 0.05;
+          if (progress <= 0.9) onProgress(progress);
+        });
+
+        // Upload to Supabase Storage
+        await Supabase.instance.client.storage
+            .from('deliveries')
+            .upload(fileName, file);
+
+        timer.cancel();
+        onProgress(1.0);
+
+        final String publicUrl = Supabase.instance.client.storage
+            .from('deliveries')
+            .getPublicUrl(fileName);
+
+        // Update order in Hive
+        final updatedOrder = order.copyWith(
+          deliveryUrl: publicUrl,
+          isDeliveryLocked: true,
+        );
+
+        final box = Hive.box<Order>('orders');
+        await box.put(order.id, updatedOrder);
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Delivery file uploaded and secured!'),
+              backgroundColor: Color(0xFF10B981),
+            ),
+          );
+          // Don't pop automatically to show success state
+        }
+      } catch (e) {
+        onProgress(0);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Upload failed: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
     }
   }
 

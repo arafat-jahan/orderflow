@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hive/hive.dart';
+import 'package:uuid/uuid.dart';
 
 part 'order.g.dart';
 
@@ -79,6 +80,12 @@ class Order extends HiveObject {
   final DateTime createdAt;
   @HiveField(9)
   List<Milestone> milestones;
+  @HiveField(10)
+  String shareToken;
+  @HiveField(11)
+  String? deliveryUrl;
+  @HiveField(12)
+  bool isDeliveryLocked;
 
   Order({
     required this.id,
@@ -91,12 +98,17 @@ class Order extends HiveObject {
     this.notes = '',
     required this.createdAt,
     List<Milestone>? milestones,
-  }) : milestones = milestones ?? [
-    Milestone(title: 'Started'),
-    Milestone(title: 'Working'),
-    Milestone(title: 'Review'),
-    Milestone(title: 'Final'),
-  ];
+    String? shareToken,
+    this.deliveryUrl,
+    this.isDeliveryLocked = true,
+  })  : milestones = milestones ??
+            [
+              Milestone(title: 'Started'),
+              Milestone(title: 'Working'),
+              Milestone(title: 'Review'),
+              Milestone(title: 'Final'),
+            ],
+        shareToken = shareToken ?? const Uuid().v4();
 
   double get progress {
     if (milestones.isEmpty) return 0.0;
@@ -113,6 +125,9 @@ class Order extends HiveObject {
     OrderStatus? status,
     String? notes,
     List<Milestone>? milestones,
+    String? shareToken,
+    String? deliveryUrl,
+    bool? isDeliveryLocked,
   }) {
     return Order(
       id: this.id,
@@ -125,6 +140,9 @@ class Order extends HiveObject {
       notes: notes ?? this.notes,
       createdAt: this.createdAt,
       milestones: milestones ?? this.milestones,
+      shareToken: shareToken ?? this.shareToken,
+      deliveryUrl: deliveryUrl ?? this.deliveryUrl,
+      isDeliveryLocked: isDeliveryLocked ?? this.isDeliveryLocked,
     );
   }
 
@@ -140,6 +158,9 @@ class Order extends HiveObject {
       'notes': notes,
       'createdAt': createdAt.toIso8601String(),
       'milestones': milestones.map((m) => m.toJson()).toList(),
+      'shareToken': shareToken,
+      'deliveryUrl': deliveryUrl,
+      'isDeliveryLocked': isDeliveryLocked,
     };
   }
 
@@ -157,6 +178,9 @@ class Order extends HiveObject {
       milestones: (json['milestones'] as List?)
           ?.map((m) => Milestone.fromJson(m))
           .toList(),
+      shareToken: json['shareToken'] ?? const Uuid().v4(),
+      deliveryUrl: json['deliveryUrl'],
+      isDeliveryLocked: json['isDeliveryLocked'] ?? true,
     );
   }
 }

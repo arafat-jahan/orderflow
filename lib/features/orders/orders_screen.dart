@@ -7,10 +7,13 @@ import 'package:flutter_slidable/flutter_slidable.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/models/order.dart';
+import '../../core/models/invoice.dart';
+import '../../core/services/invoice_service.dart';
 import '../proposals/proposal_screen.dart';
 import '../clients/clients_screen.dart';
 import '../earnings/earnings_screen.dart';
@@ -571,7 +574,6 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
     final difference = order.deadline.difference(now);
     final isUrgent = difference.inHours < 24 && difference.inHours > 0;
     final deadlineStr = difference.isNegative ? 'Overdue' : (difference.inHours < 24 ? '${difference.inHours}h left' : '${difference.inDays}d left');
-    final timeAgo = _getTimeAgo(order.createdAt);
     final ValueNotifier<bool> isHovered = ValueNotifier(false);
 
     return MouseRegion(
@@ -716,14 +718,6 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
     );
   }
 
-  String _getTimeAgo(DateTime dateTime) {
-    final diff = DateTime.now().difference(dateTime);
-    if (diff.inDays > 0) return '${diff.inDays}d ago';
-    if (diff.inHours > 0) return '${diff.inHours}h ago';
-    if (diff.inMinutes > 0) return '${diff.inMinutes}m ago';
-    return 'now';
-  }
-
   Widget _buildStatusIndicator(Color color, bool isUrgent) {
     if (isUrgent) {
       return AnimatedBuilder(
@@ -861,7 +855,6 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
               Text('MANUAL MILESTONES', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w900, color: const Color(0xFF4B5563), letterSpacing: 1.5)),
               const SizedBox(height: 16),
               ...order.milestones.asMap().entries.map((entry) {
-                final idx = entry.key;
                 final milestone = entry.value;
                 return Container(
                   margin: const EdgeInsets.only(bottom: 12),
@@ -892,13 +885,32 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
                 child: ElevatedButton.icon(
                   onPressed: () => _sendUpdateToClient(order),
                   icon: const Icon(Icons.send_rounded, size: 18),
-                  label: const Text('Send Update to Client', style: TextStyle(fontWeight: FontWeight.w800)),
+                  label: const Text('Send Update to Client',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF3B82F6),
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
                     elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () => _handleGenerateInvoice(order),
+                  icon: const Icon(Icons.description_outlined, size: 18),
+                  label: const Text('Generate & Preview Invoice',
+                      style: TextStyle(fontWeight: FontWeight.w800)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white,
+                    side: const BorderSide(color: Color(0xFF3B82F6)),
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(20)),
                   ),
                 ),
               ),
@@ -1088,18 +1100,57 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
     );
   }
 
-  Widget _buildDetailItem(String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF4B5563), fontWeight: FontWeight.w500)),
-          const SizedBox(height: 4),
-          Text(value, style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.w600)),
-        ],
-      ),
+  Future<void> _handleGenerateInvoice(Order order) async {
+    final prefs = await SharedPreferences.getInstance();
+    final currency = prefs.getString('currency') ?? 'USD \$';
+    final agencyName = prefs.getString('agency_name') ?? 'ORDERFLOW';
+    final logoPath = prefs.getString('agency_logo');
+    final paypal = prefs.getString('payment_paypal') ?? '';
+    final stripe = prefs.getString('payment_stripe') ?? '';
+    final bank = prefs.getString('payment_bank') ?? '';
+
+    // Generate PDF
+    await InvoiceService.generateInvoice(
+      order: order,
+      currency: currency,
+      agencyName: agencyName,
+      logoPath: logoPath,
+      paypalLink: paypal,
+      stripeLink: stripe,
+      bankDetails: bank,
     );
+
+    // Save to Invoice Tracker Hive Box
+    final invoiceBox = Hive.box<Invoice>('invoices');
+    final invoice = Invoice(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      orderId: order.id,
+      invoiceNumber:
+          'INV-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
+      date: DateTime.now(),
+      amount: order.price,
+      status: InvoiceStatus.sent,
+    );
+
+    await invoiceBox.put(order.id, invoice);
+
+    // Update order status if not already invoiced
+    final index = _orders.indexWhere((o) => o.id == order.id);
+    if (index != -1) {
+      setState(() {
+        // Here we could add a flag to Order model like isInvoiced
+        // For now, let's keep it tracked in the invoices box
+      });
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Invoice generated and tracked!'),
+          backgroundColor: Color(0xFF10B981),
+        ),
+      );
+    }
   }
 
   void _showAddOrderDialog() {

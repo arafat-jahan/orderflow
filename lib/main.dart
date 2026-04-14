@@ -5,6 +5,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:orderflow/core/models/order.dart';
 import 'package:orderflow/core/models/client_profile.dart';
+import 'package:orderflow/core/models/invoice.dart';
 import 'package:orderflow/features/orders/orders_screen.dart';
 
 void main() async {
@@ -24,12 +25,15 @@ void main() async {
   Hive.registerAdapter(PlatformAdapter());
   Hive.registerAdapter(OrderAdapter());
   Hive.registerAdapter(ClientProfileAdapter());
+  Hive.registerAdapter(InvoiceStatusAdapter());
+  Hive.registerAdapter(InvoiceAdapter());
   
   // Open Boxes
   await Hive.openBox<Order>('orders');
   await Hive.openBox('settings');
   await Hive.openBox('proposals');
   await Hive.openBox<ClientProfile>('client_profiles');
+  await Hive.openBox<Invoice>('invoices');
   
   runApp(const MyApp());
 }

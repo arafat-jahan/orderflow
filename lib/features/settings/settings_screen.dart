@@ -22,6 +22,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _dateFormat = 'MMM dd, yyyy';
   bool _notificationsEnabled = true;
   String _reminderHours = '24 hours';
+  String _agencyName = 'ORDERFLOW';
+  String _agencyLogo = '';
+  String _paymentPaypal = '';
+  String _paymentStripe = '';
+  String _paymentBank = '';
 
   final List<String> _tones = ['Professional', 'Friendly', 'Confident', 'Brief'];
   final List<String> _currencies = ['USD \$', 'BDT ৳', 'EUR €', 'GBP £', 'CAD \$', 'AUD \$'];
@@ -46,6 +51,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _dateFormat = prefs.getString('date_format') ?? 'MMM dd, yyyy';
       _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
       _reminderHours = prefs.getString('reminder_hours') ?? '24 hours';
+      _agencyName = prefs.getString('agency_name') ?? 'ORDERFLOW';
+      _agencyLogo = prefs.getString('agency_logo') ?? '';
+      _paymentPaypal = prefs.getString('payment_paypal') ?? '';
+      _paymentStripe = prefs.getString('payment_stripe') ?? '';
+      _paymentBank = prefs.getString('payment_bank') ?? '';
     });
   }
 
@@ -111,6 +121,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSectionHeader('Appearance'),
             _buildSectionCard([
               _buildSettingRow(
+                icon: Icons.image_outlined,
+                iconColor: Colors.pinkAccent,
+                title: 'Agency Logo',
+                trailing: Text(_agencyLogo.isEmpty ? 'Not set ↓' : 'Set ↓',
+                    style:
+                        const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                onTap: () => _showEditPaymentDialog(
+                    'Agency Logo Path', 'agency_logo', _agencyLogo),
+              ),
+              _buildSettingRow(
+                icon: Icons.business_outlined,
+                iconColor: Colors.blueAccent,
+                title: 'Agency Name',
+                trailing: Text('$_agencyName ↓',
+                    style:
+                        const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                onTap: () => _showEditPaymentDialog(
+                    'Agency Name', 'agency_name', _agencyName),
+              ),
+              _buildSettingRow(
                 icon: Icons.palette_outlined,
                 iconColor: Colors.amber,
                 title: 'Theme',
@@ -159,6 +189,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 onTap: () => _showOptionsBottomSheet('Remind me before', _reminders, _reminderHours, (val) {
                   _updateSetting('reminder_hours', val);
                 }),
+              ),
+            ]),
+            const SizedBox(height: 24),
+            _buildSectionHeader('Payment Links'),
+            _buildSectionCard([
+              _buildSettingRow(
+                icon: Icons.payment_outlined,
+                iconColor: Colors.blue,
+                title: 'PayPal Link',
+                trailing: Text(_paymentPaypal.isEmpty ? 'Not set ↓' : 'Set ↓',
+                    style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                onTap: () => _showEditPaymentDialog('PayPal Link', 'payment_paypal', _paymentPaypal),
+              ),
+              _buildSettingRow(
+                icon: Icons.credit_card_outlined,
+                iconColor: Colors.purple,
+                title: 'Stripe Link',
+                trailing: Text(_paymentStripe.isEmpty ? 'Not set ↓' : 'Set ↓',
+                    style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                onTap: () => _showEditPaymentDialog('Stripe Link', 'payment_stripe', _paymentStripe),
+              ),
+              _buildSettingRow(
+                icon: Icons.account_balance_outlined,
+                iconColor: Colors.green,
+                title: 'Bank Details',
+                trailing: Text(_paymentBank.isEmpty ? 'Not set ↓' : 'Set ↓',
+                    style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 13)),
+                onTap: () => _showEditPaymentDialog('Bank Details', 'payment_bank', _paymentBank),
               ),
             ]),
             const SizedBox(height: 24),
@@ -492,6 +550,89 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  void _showEditPaymentDialog(String title, String key, String currentValue) {
+    final controller = TextEditingController(text: currentValue);
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: const Color(0xFF111827),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (context) => Padding(
+        padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 24,
+            right: 24,
+            top: 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'Enter link or details...',
+                hintStyle: const TextStyle(color: Color(0xFF4B5563)),
+                filled: true,
+                fillColor: const Color(0xFF1A2235),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF1E2D45)),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Color(0xFF3B82F6)),
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text('Cancel',
+                        style: TextStyle(color: Color(0xFF9CA3AF))),
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () async {
+                      await _updateSetting(key, controller.text);
+                      if (!mounted) return;
+                      Navigator.pop(context);
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Save',
+                        style: TextStyle(
+                            fontWeight: FontWeight.bold, color: Colors.white)),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 24),
+          ],
         ),
       ),
     );

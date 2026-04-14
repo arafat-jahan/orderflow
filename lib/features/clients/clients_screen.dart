@@ -1,17 +1,19 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import '../../core/models/order.dart';
+import '../../core/models/client_profile.dart';
 
 class Client {
   final String name;
-  final Platform platform;
   final List<Order> orders;
   String notes;
 
   Client({
     required this.name,
-    required this.platform,
     required this.orders,
     this.notes = '',
   });
@@ -22,6 +24,8 @@ class Client {
   DateTime get lastActive => orders.fold(
       DateTime(2000),
       (latest, o) => o.createdAt.isAfter(latest) ? o.createdAt : latest);
+
+  bool get isVIP => totalEarned > 500;
 
   String get initials {
     final names = name.split(' ');
@@ -47,26 +51,15 @@ class _ClientsScreenState extends State<ClientsScreen> with SingleTickerProvider
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
   String _sortBy = 'Recent';
-  late AnimationController _searchAnimationController;
-  late Animation<double> _searchAnimation;
 
   @override
   void initState() {
     super.initState();
-    _searchAnimationController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
-    );
-    _searchAnimation = CurvedAnimation(
-      parent: _searchAnimationController,
-      curve: Curves.easeInOut,
-    );
     _processClients();
   }
 
   @override
   void dispose() {
-    _searchAnimationController.dispose();
     _searchController.dispose();
     super.dispose();
   }
@@ -85,16 +78,34 @@ class _ClientsScreenState extends State<ClientsScreen> with SingleTickerProvider
       _clientOrdersMap.putIfAbsent(order.clientName, () => []).add(order);
     }
 
+    final box = Hive.box<ClientProfile>('client_profiles');
+
     _clients = _clientOrdersMap.entries.map((entry) {
+      final profile = box.get(entry.key);
       return Client(
         name: entry.key,
-        platform: entry.value.first.platform,
         orders: entry.value,
+        notes: profile?.notes ?? '',
       );
     }).toList();
 
     _sortClients();
     _applySearch();
+  }
+
+  Future<void> _updateClientNotes(String clientName, String notes) async {
+    final box = Hive.box<ClientProfile>('client_profiles');
+    final profile = box.get(clientName) ?? ClientProfile(name: clientName);
+    profile.notes = notes;
+    await box.put(clientName, profile);
+    
+    // Update local state
+    final index = _clients.indexWhere((c) => c.name == clientName);
+    if (index != -1) {
+      setState(() {
+        _clients[index].notes = notes;
+      });
+    }
   }
 
   void _sortClients() {
@@ -132,7 +143,7 @@ class _ClientsScreenState extends State<ClientsScreen> with SingleTickerProvider
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0F1E),
+      backgroundColor: const Color(0xFF030712),
       appBar: _buildAppBar(),
       body: _filteredClients.isEmpty ? _buildEmptyState() : _buildClientsList(),
     );
@@ -142,135 +153,48 @@ class _ClientsScreenState extends State<ClientsScreen> with SingleTickerProvider
     final double totalEarned = _clients.fold(0, (sum, c) => sum + c.totalEarned);
     final double avgPerClient = _clients.isNotEmpty ? totalEarned / _clients.length : 0;
     
-    // Find top platform
-    final Map<Platform, int> platformCounts = {};
-    for (var client in _clients) {
-      platformCounts[client.platform] = (platformCounts[client.platform] ?? 0) + 1;
-    }
-    final topPlatform = platformCounts.entries.isEmpty 
-        ? null 
-        : platformCounts.entries.reduce((a, b) => a.value > b.value ? a : b).key;
-
-    return PreferredSize(
-      preferredSize: Size.fromHeight(_isSearching ? 60 : 120),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 300),
-        child: _isSearching ? _buildSearchHeader() : _buildDefaultHeader(totalEarned, avgPerClient, topPlatform),
-      ),
-    );
-  }
-
-  Widget _buildSearchHeader() {
     return AppBar(
-      key: const ValueKey('searchHeader'),
-      backgroundColor: const Color(0xFF0A0F1E),
+      backgroundColor: Colors.transparent,
       elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back, color: Colors.white),
-        onPressed: () {
-          setState(() {
-            _isSearching = false;
-            _searchController.clear();
-            _applySearch();
-          });
-        },
-      ),
-      title: Container(
-        height: 45,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A2235),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.5)),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFF3B82F6).withOpacity(0.1),
-              blurRadius: 10,
-              spreadRadius: 2,
-            ),
-          ],
-        ),
-        child: TextField(
-          controller: _searchController,
-          autofocus: true,
-          style: const TextStyle(color: Colors.white),
-          decoration: InputDecoration(
-            hintText: 'Search clients...',
-            hintStyle: const TextStyle(color: Color(0xFF4B5563)),
-            border: InputBorder.none,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            suffixText: '${_filteredClients.length} results',
-            suffixStyle: const TextStyle(color: Color(0xFF4B5563), fontSize: 12),
-          ),
-          onChanged: (_) => _applySearch(),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDefaultHeader(double totalEarned, double avgPerClient, Platform? topPlatform) {
-    return AppBar(
-      key: const ValueKey('defaultHeader'),
-      backgroundColor: const Color(0xFF0A0F1E),
-      elevation: 0,
-      toolbarHeight: 120,
+      toolbarHeight: 140,
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Clients',
-            style: GoogleFonts.inter(
-              fontWeight: FontWeight.w700,
-              fontSize: 24,
-              color: Colors.white,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('B2B CRM', style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 28, color: Colors.white, letterSpacing: -1)),
+                  Text('${_clients.length} Active Partners', style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF94A3B8))),
+                ],
+              ),
+              _buildSortPill(),
+            ],
           ),
-          Text(
-            '${_clients.length} total clients',
-            style: GoogleFonts.inter(
-              fontSize: 13,
-              color: const Color(0xFF9CA3AF),
-            ),
-          ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 20),
           Row(
             children: [
-              _buildStatPill('Total earned: \$${totalEarned.toInt()}', const Color(0xFF10B981)),
+              _buildStatPill('Lifetime: \$${totalEarned.toInt()}', const Color(0xFF10B981)),
               const SizedBox(width: 8),
-              _buildStatPill('Avg: \$${avgPerClient.toInt()}', const Color(0xFF3B82F6)),
-              const SizedBox(width: 8),
-              if (topPlatform != null)
-                _buildStatPill('Top: ${topPlatform.label}', topPlatform.bgColor),
+              _buildStatPill('Avg/Client: \$${avgPerClient.toInt()}', const Color(0xFF3B82F6)),
             ],
           ),
         ],
       ),
-      actions: [
-        IconButton(
-          icon: const Icon(Icons.search, color: Colors.white),
-          onPressed: () => setState(() => _isSearching = true),
-        ),
-        _buildSortPill(),
-        const SizedBox(width: 16),
-      ],
     );
   }
 
   Widget _buildStatPill(String label, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF1A2235),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withAlpha(20),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withAlpha(30)),
       ),
-      child: Text(
-        label,
-        style: TextStyle(
-          color: color,
-          fontSize: 10,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+      child: Text(label, style: GoogleFonts.inter(color: color, fontSize: 11, fontWeight: FontWeight.w700)),
     );
   }
 
@@ -278,21 +202,18 @@ class _ClientsScreenState extends State<ClientsScreen> with SingleTickerProvider
     return GestureDetector(
       onTap: _showSortBottomSheet,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         decoration: BoxDecoration(
           color: const Color(0xFF1A2235),
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(16),
           border: Border.all(color: const Color(0xFF1E2D45)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Sort',
-              style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-            ),
-            const SizedBox(width: 4),
-            Icon(Icons.unfold_more, color: Colors.white.withOpacity(0.7), size: 16),
+            Text(_sortBy, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+            const SizedBox(width: 6),
+            const Icon(Icons.tune, color: Color(0xFF94A3B8), size: 14),
           ],
         ),
       ),
@@ -303,82 +224,22 @@ class _ClientsScreenState extends State<ClientsScreen> with SingleTickerProvider
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF111827),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
       builder: (context) => Container(
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Sort by',
-              style: GoogleFonts.inter(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
+            Text('Sort Partners', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white)),
             const SizedBox(height: 20),
-            _buildSortOption('Recent'),
-            _buildSortOption('Most Earned'),
-            _buildSortOption('Most Orders'),
-            _buildSortOption('Name A-Z'),
-            const SizedBox(height: 10),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSortOption(String value) {
-    final bool isSelected = _sortBy == value;
-    return InkWell(
-      onTap: () {
-        setState(() {
-          _sortBy = value;
-          _sortClients();
-          _applySearch();
-        });
-        Navigator.pop(context);
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        child: Row(
-          children: [
-            Container(
-              width: 20,
-              height: 20,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: isSelected ? const Color(0xFF3B82F6) : const Color(0xFF4B5563),
-                  width: 2,
-                ),
-              ),
-              child: isSelected 
-                  ? Center(
-                      child: Container(
-                        width: 10,
-                        height: 10,
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Color(0xFF3B82F6),
-                        ),
-                      ),
-                    )
-                  : null,
-            ),
-            const SizedBox(width: 16),
-            Text(
-              value,
-              style: TextStyle(
-                color: isSelected ? Colors.white : const Color(0xFF9CA3AF),
-                fontSize: 15,
-                fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-              ),
-            ),
+            ...['Recent', 'Most Earned', 'Most Orders', 'Name A-Z'].map((value) => ListTile(
+              title: Text(value, style: TextStyle(color: _sortBy == value ? const Color(0xFF3B82F6) : Colors.white)),
+              onTap: () {
+                setState(() { _sortBy = value; _sortClients(); });
+                Navigator.pop(context);
+              },
+            )),
           ],
         ),
       ),
@@ -392,23 +253,7 @@ class _ClientsScreenState extends State<ClientsScreen> with SingleTickerProvider
         children: [
           const Icon(Icons.people_outline, size: 64, color: Color(0xFF1E2D45)),
           const SizedBox(height: 24),
-          Text(
-            'No clients yet',
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.white,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Clients appear automatically when you add orders',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 14,
-              color: const Color(0xFF9CA3AF),
-            ),
-          ),
+          Text('No clients yet', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white)),
         ],
       ),
     );
@@ -420,506 +265,134 @@ class _ClientsScreenState extends State<ClientsScreen> with SingleTickerProvider
       itemCount: _filteredClients.length,
       itemBuilder: (context, index) {
         final client = _filteredClients[index];
-        return _buildClientCard(client);
+        return _buildClientCard(client)
+            .animate()
+            .scale(
+              duration: 400.ms,
+              delay: (index * 100).ms,
+              curve: Curves.easeOutBack,
+            )
+            .fadeIn(duration: 400.ms);
       },
     );
   }
 
   Widget _buildClientCard(Client client) {
-    Color accentColor;
-    if (client.totalEarned < 100) {
-      accentColor = const Color(0xFF4B5563); // grey
-    } else if (client.totalEarned < 500) {
-      accentColor = const Color(0xFF3B82F6); // blue
-    } else {
-      accentColor = const Color(0xFFF59E0B); // gold
-    }
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      constraints: const BoxConstraints(minHeight: 80),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1A2235),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF1E2D45)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
-        children: [
-          // Right accent
-          Positioned(
-            right: 0,
-            top: 15,
-            bottom: 15,
-            width: 3,
-            child: Container(
-              decoration: BoxDecoration(
-                color: accentColor,
-                borderRadius: const BorderRadius.horizontal(left: Radius.circular(4)),
-              ),
-            ),
+    return GestureDetector(
+      onTap: () => _showClientVault(client),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 20),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111827).withAlpha(150),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: client.isVIP
+                ? const Color(0xFFFFD700).withAlpha(100)
+                : Colors.white.withAlpha(10),
+            width: client.isVIP ? 2 : 1,
           ),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () => _showClientDetail(client),
-              hoverColor: Colors.white.withOpacity(0.05),
-              splashColor: Colors.white.withOpacity(0.05),
-              highlightColor: Colors.transparent,
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                child: Row(
-                  children: [
-                    _buildAvatar(client),
-                    const SizedBox(width: 16),
-                    Expanded(child: _buildClientInfo(client)),
-                    _buildClientStats(client),
-                    const SizedBox(width: 8),
-                    Icon(
-                      Icons.chevron_right,
-                      color: const Color(0xFF4B5563).withOpacity(0.5),
-                      size: 20,
-                    ),
+          gradient: client.isVIP
+              ? LinearGradient(
+                  colors: [
+                    const Color(0xFFFFD700).withAlpha(30),
+                    const Color(0xFFDAA520).withAlpha(10),
                   ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAvatar(Client client) {
-    return Container(
-      width: 52,
-      height: 52,
-      decoration: BoxDecoration(
-        shape: BoxShape.circle,
-        border: Border.all(color: client.platform.bgColor.withOpacity(0.5), width: 2),
-      ),
-      padding: const EdgeInsets.all(2),
-      child: Container(
-        decoration: BoxDecoration(
-          color: client.platform.bgColor,
-          shape: BoxShape.circle,
-        ),
-        child: Center(
-          child: Text(
-            client.initials,
-            style: TextStyle(
-              color: client.platform.textColor,
-              fontWeight: FontWeight.bold,
-              fontSize: 18,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildClientInfo(Client client) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          client.name,
-          style: GoogleFonts.inter(
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 4),
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-              decoration: BoxDecoration(
-                color: client.platform.bgColor.withOpacity(0.2),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                client.platform.label,
-                style: TextStyle(
-                  color: client.platform.bgColor,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              '${client.totalOrders} orders',
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF9CA3AF),
-              ),
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                )
+              : null,
+          boxShadow: [
+            BoxShadow(
+              color: client.isVIP
+                  ? const Color(0xFFFFD700).withAlpha(20)
+                  : Colors.black.withAlpha(50),
+              blurRadius: client.isVIP ? 30 : 20,
+              offset: const Offset(0, 10),
             ),
           ],
         ),
-        const SizedBox(height: 2),
-        Text(
-          'Active ${_getTimeAgo(client.lastActive)}',
-          style: const TextStyle(
-            fontSize: 11,
-            color: Color(0xFF4B5563),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildClientStats(Client client) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Text(
-          '\$${client.totalEarned.toInt()}',
-          style: GoogleFonts.inter(
-            fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: const Color(0xFF3B82F6),
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _getTimeAgo(DateTime dateTime) {
-    final now = DateTime.now();
-    final difference = now.difference(dateTime);
-    if (difference.inDays > 0) {
-      return '${difference.inDays} days ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours} hours ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes} mins ago';
-    }
-    return 'just now';
-  }
-
-  void _showClientDetail(Client client) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.8,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        builder: (_, controller) => _ClientDetailSheet(
-          client: client, 
-          scrollController: controller,
-          clientOrdersMap: _clientOrdersMap,
-        ),
-      ),
-    );
-  }
-}
-
-class _ClientDetailSheet extends StatefulWidget {
-  final Client client;
-  final ScrollController scrollController;
-  final Map<String, List<Order>> clientOrdersMap;
-  const _ClientDetailSheet({
-    required this.client, 
-    required this.scrollController,
-    required this.clientOrdersMap,
-  });
-
-  @override
-  State<_ClientDetailSheet> createState() => _ClientDetailSheetState();
-}
-
-class _ClientDetailSheetState extends State<_ClientDetailSheet> {
-  late TextEditingController _notesController;
-
-  @override
-  void initState() {
-    super.initState();
-    _notesController = TextEditingController(text: widget.client.notes);
-    _notesController.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    _notesController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFF111827),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        children: [
-          _buildHandle(),
-          Expanded(
-            child: SingleChildScrollView(
-              controller: widget.scrollController,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildHeader(),
-                  Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _buildStatsRow(),
-                        const SizedBox(height: 32),
-                        _buildSectionTitle('Order History'),
-                        const SizedBox(height: 16),
-                        _buildOrderHistory(),
-                        const SizedBox(height: 32),
-                        _buildSectionTitle('Notes'),
-                        const SizedBox(height: 16),
-                        _buildNotesSection(),
-                        const SizedBox(height: 40),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHandle() {
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 12),
-        width: 36,
-        height: 4,
-        decoration: BoxDecoration(
-          color: const Color(0xFF4B5563).withOpacity(0.5),
-          borderRadius: BorderRadius.circular(2),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color(0xFF1A2235), Color(0xFF111827)],
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 64,
-            height: 64,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: widget.client.platform.bgColor.withOpacity(0.3),
-                  blurRadius: 12,
-                  spreadRadius: 2,
-                ),
-              ],
-              border: Border.all(color: widget.client.platform.bgColor, width: 2),
-            ),
-            child: CircleAvatar(
-              backgroundColor: widget.client.platform.bgColor,
-              child: Text(
-                widget.client.initials,
-                style: TextStyle(
-                  color: widget.client.platform.textColor,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 24,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 20),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  widget.client.name,
-                  style: GoogleFonts.inter(
-                    fontSize: 24,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.white,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: widget.client.platform.bgColor.withOpacity(0.2),
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Text(
-                    widget.client.platform.label,
-                    style: TextStyle(
-                      color: widget.client.platform.bgColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatsRow() {
-    final orders = widget.clientOrdersMap[widget.client.name] ?? [];
-    final double totalEarned = orders.isEmpty ? 0 : orders.map((o) => o.price).reduce((a, b) => a + b);
-    final double avgValue = orders.isEmpty ? 0 : totalEarned / orders.length;
-
-    return Row(
-      children: [
-        _buildStatCard(
-          'Total Orders', 
-          orders.length.toString(),
-          const Color(0xFF3B82F6),
-          Icons.receipt_long,
-        ),
-        const SizedBox(width: 12),
-        _buildStatCard(
-          'Total Earned', 
-          '\$${totalEarned.toInt()}',
-          const Color(0xFF10B981),
-          Icons.attach_money,
-        ),
-        const SizedBox(width: 12),
-        _buildStatCard(
-          'Avg Value', 
-          '\$${avgValue.toInt()}',
-          const Color(0xFFF59E0B),
-          Icons.trending_up,
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStatCard(String label, String value, Color color, IconData icon) {
-    return Expanded(
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 90),
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E2D45),
-          borderRadius: BorderRadius.circular(16),
-          border: Border(
-            top: BorderSide(color: color, width: 3),
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: GoogleFonts.inter(
-                fontSize: 20,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 12,
-                color: Color(0xFF9CA3AF),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSectionTitle(String title) {
-    return Text(
-      title,
-      style: GoogleFonts.inter(
-        fontSize: 18,
-        fontWeight: FontWeight.bold,
-        color: Colors.white,
-      ),
-    );
-  }
-
-  Widget _buildOrderHistory() {
-    final orders = widget.clientOrdersMap[widget.client.name] ?? [];
-    if (orders.isEmpty) {
-      return const Center(
         child: Padding(
-          padding: EdgeInsets.symmetric(vertical: 24),
-          child: Text(
-            'No orders yet',
-            style: TextStyle(color: Color(0xFF4B5563), fontSize: 14),
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      children: orders.map((order) {
-        return Container(
-          margin: const EdgeInsets.only(bottom: 6),
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF1E2D45),
-            borderRadius: BorderRadius.circular(10),
-            border: Border(
-              left: BorderSide(color: order.status.bgColor, width: 4),
-            ),
-          ),
+          padding: const EdgeInsets.all(20),
           child: Row(
             children: [
+              Container(
+                padding: const EdgeInsets.all(2),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: client.isVIP
+                          ? const Color(0xFFFFD700).withAlpha(150)
+                          : Colors.white.withAlpha(40),
+                      width: 2),
+                ),
+                child: CircleAvatar(
+                  radius: 20,
+                  backgroundColor: client.isVIP
+                      ? const Color(0xFFFFD700).withAlpha(40)
+                      : Colors.white.withAlpha(10),
+                  child: Text(client.initials,
+                      style: GoogleFonts.inter(
+                          color: client.isVIP ? const Color(0xFFFFD700) : Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 12)),
+                ),
+              ),
+              const SizedBox(width: 16),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      order.title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
+                    Row(
+                      children: [
+                        Text(client.name,
+                            style: GoogleFonts.inter(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 16)),
+                        if (client.isVIP) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFFD700).withAlpha(30),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: const Color(0xFFFFD700).withAlpha(50)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFFFD700).withAlpha(40),
+                                  blurRadius: 8,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                            child: Text('VIP',
+                                style: GoogleFonts.inter(
+                                    color: const Color(0xFFFFD700),
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w900)),
+                          ),
+                        ],
+                      ],
                     ),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: order.status.bgColor.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        order.status.label,
-                        style: TextStyle(
-                          color: order.status.textColor,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        Text('${client.totalOrders} Projects',
+                            style: GoogleFonts.inter(
+                                color: const Color(0xFF64748B), fontSize: 12)),
+                        const SizedBox(width: 8),
+                        const Text('•', style: TextStyle(color: Color(0xFF475569))),
+                        const SizedBox(width: 8),
+                        Text('Avg: \$${client.avgOrderValue.toInt()}',
+                            style: GoogleFonts.inter(
+                                color: client.isVIP
+                                    ? const Color(0xFFFFD700)
+                                    : const Color(0xFFDC2626),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600)),
+                      ],
                     ),
                   ],
                 ),
@@ -927,117 +400,294 @@ class _ClientDetailSheetState extends State<_ClientDetailSheet> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  Text(
-                    '\$${order.price.toInt()}',
-                    style: const TextStyle(
-                      color: Color(0xFF3B82F6),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+                  Text('\$${client.totalEarned.toInt()}',
+                      style: GoogleFonts.inter(
+                          color: const Color(0xFF10B981),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18)),
+                  Text('LIFETIME',
+                      style: GoogleFonts.inter(
+                          color: const Color(0xFF4B5563),
+                          fontSize: 9,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1)),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showClientVault(Client client) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        height: MediaQuery.of(context).size.height * 0.9,
+        decoration: BoxDecoration(
+          color: const Color(0xFF030712).withAlpha(200),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(40)),
+          border: Border.all(color: Colors.white.withAlpha(20)),
+        ),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 30, sigmaY: 30),
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 60,
+                    height: 5,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withAlpha(20),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    DateFormat('MMM d, yyyy').format(order.createdAt),
-                    style: const TextStyle(
-                      color: Color(0xFF4B5563),
-                      fontSize: 11,
+                ),
+                const SizedBox(height: 32),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('THE VAULT',
+                            style: GoogleFonts.inter(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                color: const Color(0xFF94A3B8),
+                                letterSpacing: 4)),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Text(client.name,
+                                style: GoogleFonts.inter(
+                                    fontSize: 32,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white)),
+                            if (client.isVIP) ...[
+                              const SizedBox(width: 12),
+                              const Icon(Icons.stars_rounded,
+                                  color: Color(0xFFFFD700), size: 32),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.close_rounded,
+                          color: Colors.white, size: 32),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 40),
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildProfitabilityMeter(client),
+                        const SizedBox(height: 40),
+                        Text('PERSONAL PREFERENCES',
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                                color: const Color(0xFF4B5563),
+                                letterSpacing: 1.5)),
+                        const SizedBox(height: 16),
+                        _buildNotesField(client),
+                        const SizedBox(height: 40),
+                        Text('ORDER TIMELINE',
+                            style: GoogleFonts.inter(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900,
+                                color: const Color(0xFF4B5563),
+                                letterSpacing: 1.5)),
+                        const SizedBox(height: 24),
+                        _buildTimeline(client),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProfitabilityMeter(Client client) {
+    // Assuming 20% cost of operations for demo
+    final netProfit = client.totalEarned * 0.8;
+    final percentage = (netProfit / client.totalEarned) * 100;
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(5),
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: Colors.white.withAlpha(10)),
+      ),
+      child: Column(
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('NET PROFITABILITY',
+                      style: GoogleFonts.inter(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          color: const Color(0xFF94A3B8),
+                          letterSpacing: 1)),
+                  const SizedBox(height: 8),
+                  Text('\$${netProfit.toInt()}',
+                      style: GoogleFonts.inter(
+                          fontSize: 28,
+                          fontWeight: FontWeight.w900,
+                          color: const Color(0xFF10B981))),
+                ],
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withAlpha(20),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Text('${percentage.toInt()}% MARGIN',
+                    style: GoogleFonts.inter(
+                        color: const Color(0xFF10B981),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: LinearProgressIndicator(
+              value: 0.8,
+              minHeight: 8,
+              backgroundColor: Colors.white.withAlpha(5),
+              valueColor: const AlwaysStoppedAnimation(Color(0xFF10B981)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotesField(Client client) {
+    return TextField(
+      maxLines: 4,
+      style: GoogleFonts.inter(color: Colors.white, fontSize: 15),
+      controller: TextEditingController(text: client.notes),
+      onSubmitted: (val) => _updateClientNotes(client.name, val),
+      decoration: InputDecoration(
+        hintText: 'Add preference notes...',
+        hintStyle:
+            GoogleFonts.inter(color: const Color(0xFF4B5563), fontSize: 15),
+        filled: true,
+        fillColor: Colors.white.withAlpha(5),
+        contentPadding: const EdgeInsets.all(20),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide: BorderSide.none,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide: BorderSide(color: Colors.white.withAlpha(10)),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(24),
+          borderSide: BorderSide(color: const Color(0xFFDC2626).withAlpha(50)),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTimeline(Client client) {
+    final sortedOrders = List<Order>.from(client.orders)
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+    return Column(
+      children: sortedOrders.map((order) {
+        return IntrinsicHeight(
+          child: Row(
+            children: [
+              Column(
+                children: [
+                  Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: order.status.textColor,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: order.status.textColor.withAlpha(100),
+                          blurRadius: 10,
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: Container(
+                      width: 2,
+                      color: Colors.white.withAlpha(10),
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(width: 24),
+              Expanded(
+                child: Container(
+                  margin: const EdgeInsets.only(bottom: 24),
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(5),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: Colors.white.withAlpha(5)),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(order.title,
+                              style: GoogleFonts.inter(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15)),
+                          const SizedBox(height: 4),
+                          Text(DateFormat('MMMM d, yyyy').format(order.createdAt),
+                              style: GoogleFonts.inter(
+                                  color: const Color(0xFF64748B), fontSize: 12)),
+                        ],
+                      ),
+                      Text('\$${order.price.toInt()}',
+                          style: GoogleFonts.inter(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16)),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
         );
       }).toList(),
-    );
-  }
-
-  Widget _buildNotesSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Stack(
-          children: [
-            TextField(
-              controller: _notesController,
-              maxLines: 4,
-              maxLength: 500,
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                hintText: 'Add notes about this client...',
-                hintStyle: const TextStyle(color: Color(0xFF4B5563)),
-                filled: true,
-                fillColor: const Color(0xFF1A2235),
-                counterText: '',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF1E2D45)),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF1E2D45)),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF3B82F6)),
-                ),
-              ),
-            ),
-            Positioned(
-              right: 12,
-              bottom: 12,
-              child: Text(
-                '${_notesController.text.length}/500',
-                style: const TextStyle(
-                  color: Color(0xFF4B5563),
-                  fontSize: 10,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 24),
-        Container(
-          height: 52,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            gradient: const LinearGradient(
-              colors: [Color(0xFF3B82F6), Color(0xFF2563EB)],
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF3B82F6).withOpacity(0.3),
-                blurRadius: 12,
-                offset: const Offset(0, 4),
-              ),
-            ],
-          ),
-          child: ElevatedButton(
-            onPressed: () {
-              widget.client.notes = _notesController.text;
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Notes saved!'),
-                  backgroundColor: Color(0xFF10B981),
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.transparent,
-              foregroundColor: Colors.white,
-              shadowColor: Colors.transparent,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: const Text(
-              'Save Notes', 
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-            ),
-          ),
-        ),
-      ],
     );
   }
 }

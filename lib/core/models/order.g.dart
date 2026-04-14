@@ -6,6 +6,43 @@ part of 'order.dart';
 // TypeAdapterGenerator
 // **************************************************************************
 
+class MilestoneAdapter extends TypeAdapter<Milestone> {
+  @override
+  final int typeId = 3;
+
+  @override
+  Milestone read(BinaryReader reader) {
+    final numOfFields = reader.readByte();
+    final fields = <int, dynamic>{
+      for (int i = 0; i < numOfFields; i++) reader.readByte(): reader.read(),
+    };
+    return Milestone(
+      title: fields[0] as String,
+      isCompleted: fields[1] as bool,
+    );
+  }
+
+  @override
+  void write(BinaryWriter writer, Milestone obj) {
+    writer
+      ..writeByte(2)
+      ..writeByte(0)
+      ..write(obj.title)
+      ..writeByte(1)
+      ..write(obj.isCompleted);
+  }
+
+  @override
+  int get hashCode => typeId.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MilestoneAdapter &&
+          runtimeType == other.runtimeType &&
+          typeId == other.typeId;
+}
+
 class OrderAdapter extends TypeAdapter<Order> {
   @override
   final int typeId = 0;
@@ -26,13 +63,14 @@ class OrderAdapter extends TypeAdapter<Order> {
       status: fields[6] as OrderStatus,
       notes: fields[7] as String,
       createdAt: fields[8] as DateTime,
+      milestones: (fields[9] as List?)?.cast<Milestone>(),
     );
   }
 
   @override
   void write(BinaryWriter writer, Order obj) {
     writer
-      ..writeByte(9)
+      ..writeByte(10)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -50,7 +88,9 @@ class OrderAdapter extends TypeAdapter<Order> {
       ..writeByte(7)
       ..write(obj.notes)
       ..writeByte(8)
-      ..write(obj.createdAt);
+      ..write(obj.createdAt)
+      ..writeByte(9)
+      ..write(obj.milestones);
   }
 
   @override

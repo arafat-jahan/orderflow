@@ -8,6 +8,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../core/models/order.dart';
 import '../proposals/proposal_screen.dart';
 import '../clients/clients_screen.dart';
@@ -120,17 +122,7 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
 
   Future<void> _saveOrders() async {
     final prefs = await SharedPreferences.getInstance();
-    final jsonStr = jsonEncode(_orders.map((o) => {
-      'id': o.id,
-      'title': o.title,
-      'clientName': o.clientName,
-      'platform': o.platform.index,
-      'price': o.price,
-      'deadline': o.deadline.toIso8601String(),
-      'status': o.status.index,
-      'notes': o.notes,
-      'createdAt': o.createdAt.toIso8601String(),
-    }).toList());
+    final jsonStr = jsonEncode(_orders.map((o) => o.toJson()).toList());
     await prefs.setString('orderflow_orders', jsonStr);
   }
 
@@ -140,17 +132,7 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
     if (jsonStr == null || jsonStr.isEmpty) return [];
     try {
       final List<dynamic> list = jsonDecode(jsonStr);
-      return list.map((e) => Order(
-        id: e['id'],
-        title: e['title'],
-        clientName: e['clientName'],
-        platform: Platform.values[e['platform']],
-        price: (e['price'] as num).toDouble(),
-        deadline: DateTime.parse(e['deadline']),
-        status: OrderStatus.values[e['status']],
-        notes: e['notes'] ?? '',
-        createdAt: DateTime.parse(e['createdAt']),
-      )).toList();
+      return list.map((e) => Order.fromJson(e)).toList();
     } catch (e) {
       return [];
     }
@@ -676,7 +658,7 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
                                             ),
                                           ),
                                           const SizedBox(width: 12),
-                                          Text('\$${order.price.toInt()}', style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.w900, color: const Color(0xFF3B82F6))),
+                                          _buildProgressCircle(order.progress),
                                         ],
                                       ),
                                       const SizedBox(height: 14),
@@ -702,9 +684,7 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
                                             ),
                                           ),
                                           const SizedBox(width: 6),
-                                          const Text('•', style: TextStyle(color: Color(0xFF475569))),
-                                          const SizedBox(width: 6),
-                                          Text(timeAgo, style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF475569), fontWeight: FontWeight.w400)),
+                                          Text('\$${order.price.toInt()}', style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.w900, color: const Color(0xFF3B82F6))),
                                         ],
                                       ),
                                       const SizedBox(height: 18),
@@ -713,6 +693,8 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
                                           _buildDeadlineChip(deadlineStr, isUrgent ? const Color(0xFFEF4444) : const Color(0xFF94A3B8)),
                                           const SizedBox(width: 10),
                                           _buildStatusChip(order.status),
+                                          const Spacer(),
+                                          Text('${(order.progress * 100).toInt()}%', style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF3B82F6), fontWeight: FontWeight.w900)),
                                         ],
                                       ),
                                     ],
@@ -809,6 +791,31 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
     );
   }
 
+  Widget _buildProgressCircle(double progress) {
+    return SizedBox(
+      width: 36,
+      height: 36,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          CircularProgressIndicator(
+            value: progress,
+            strokeWidth: 3,
+            backgroundColor: const Color(0xFF3B82F6).withAlpha(30),
+            valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF3B82F6)),
+          ),
+          Center(
+            child: Icon(
+              progress == 1.0 ? Icons.check : Icons.trending_up,
+              size: 14,
+              color: const Color(0xFF3B82F6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmptyState() {
     return Center(
       child: Column(
@@ -829,23 +836,254 @@ class _OrdersScreenState extends State<OrdersScreen> with TickerProviderStateMix
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) => Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFF111827),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+          ),
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Workflow Engine', style: GoogleFonts.inter(fontSize: 24, fontWeight: FontWeight.w900, color: Colors.white)),
+                  _buildProgressCircle(order.progress),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(order.title, style: GoogleFonts.inter(fontSize: 14, color: const Color(0xFF94A3B8))),
+              const SizedBox(height: 32),
+              
+              Text('MANUAL MILESTONES', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w900, color: const Color(0xFF4B5563), letterSpacing: 1.5)),
+              const SizedBox(height: 16),
+              ...order.milestones.asMap().entries.map((entry) {
+                final idx = entry.key;
+                final milestone = entry.value;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: milestone.isCompleted ? const Color(0xFF3B82F6).withAlpha(10) : Colors.white.withAlpha(5),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: milestone.isCompleted ? const Color(0xFF3B82F6).withAlpha(30) : Colors.white.withAlpha(10)),
+                  ),
+                  child: CheckboxListTile(
+                    value: milestone.isCompleted,
+                    onChanged: (val) async {
+                      setModalState(() => milestone.isCompleted = val!);
+                      setState(() {}); // Update main screen
+                      await _saveOrders();
+                    },
+                    title: Text(milestone.title, style: GoogleFonts.inter(color: Colors.white, fontSize: 14, fontWeight: milestone.isCompleted ? FontWeight.w700 : FontWeight.w500)),
+                    activeColor: const Color(0xFF3B82F6),
+                    checkColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  ),
+                );
+              }),
+              
+              const SizedBox(height: 32),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _sendUpdateToClient(order),
+                  icon: const Icon(Icons.send_rounded, size: 18),
+                  label: const Text('Send Update to Client', style: TextStyle(fontWeight: FontWeight.w800)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF3B82F6),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Center(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: Text('Close Engine', style: GoogleFonts.inter(color: const Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _sendUpdateToClient(Order order) {
+    final completed = order.milestones
+        .where((m) => m.isCompleted)
+        .map((m) => m.title)
+        .join(', ');
+    final progressStr = '${(order.progress * 100).toInt()}%';
+
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final deadlineDate =
+        DateTime(order.deadline.year, order.deadline.month, order.deadline.day);
+
+    String deadlineStatus;
+    if (deadlineDate.isAtSameMomentAs(today)) {
+      deadlineStatus = 'Due Today';
+    } else if (deadlineDate.isBefore(today)) {
+      deadlineStatus = 'Delayed';
+    } else {
+      deadlineStatus = 'On time';
+    }
+
+    final message = "Hello! Here is a status update for ${order.title}.\n\n"
+        "Progress: $progressStr\n"
+        "Tasks completed: ${completed.isEmpty ? 'None yet' : completed}\n"
+        "Estimated delivery: $deadlineStatus.";
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
       builder: (context) => Container(
-        decoration: const BoxDecoration(color: Color(0xFF111827), borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Order Details', style: GoogleFonts.inter(fontSize: 20, fontWeight: FontWeight.w700, color: Colors.white)),
-            const SizedBox(height: 24),
-            _buildDetailItem('Title', order.title),
-            _buildDetailItem('Client', order.clientName),
-            _buildDetailItem('Platform', order.platform.label),
-            _buildDetailItem('Price', '\$${order.price}'),
-            _buildDetailItem('Notes', order.notes),
-            const SizedBox(height: 24),
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111827).withAlpha(180),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+          border: Border.all(color: Colors.white.withAlpha(20)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withAlpha(100),
+              blurRadius: 40,
+              offset: const Offset(0, -10),
+            ),
           ],
         ),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 24),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(20),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Text('Choose Platform',
+                  style: GoogleFonts.inter(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w900,
+                      color: Colors.white)),
+              const SizedBox(height: 24),
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white.withAlpha(10),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.white.withAlpha(20)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('MESSAGE PREVIEW',
+                        style: GoogleFonts.inter(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            color: const Color(0xFF94A3B8),
+                            letterSpacing: 1.5)),
+                    const SizedBox(height: 12),
+                    Text(message,
+                        style: GoogleFonts.inter(
+                            fontSize: 14, color: Colors.white, height: 1.5)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 32),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildShareButton(
+                      icon: Icons.chat_outlined,
+                      label: 'WhatsApp Web',
+                      color: const Color(0xFF10B981),
+                      onTap: () async {
+                        final url = Uri.parse(
+                            "https://wa.me/?text=${Uri.encodeComponent(message)}");
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url,
+                              mode: LaunchMode.externalApplication);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _buildShareButton(
+                      icon: Icons.email_outlined,
+                      label: 'Email',
+                      color: const Color(0xFF3B82F6),
+                      onTap: () async {
+                        final url = Uri.parse(
+                            "mailto:?subject=Status Update: ${order.title}&body=${Uri.encodeComponent(message)}");
+                        if (await canLaunchUrl(url)) {
+                          await launchUrl(url);
+                        }
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: _buildShareButton(
+                  icon: Icons.copy_rounded,
+                  label: 'Copy to Clipboard',
+                  color: const Color(0xFF6366F1),
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: message));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Message copied to clipboard!'),
+                        behavior: SnackBarBehavior.floating,
+                        backgroundColor: Color(0xFF10B981),
+                      ),
+                    );
+                    Navigator.pop(context);
+                  },
+                ),
+              ),
+              const SizedBox(height: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildShareButton({required IconData icon, required String label, required Color color, required VoidCallback onTap}) {
+    return ElevatedButton.icon(
+      onPressed: onTap,
+      icon: Icon(icon, size: 20),
+      label: Text(label, style: const TextStyle(fontWeight: FontWeight.w700)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: color.withAlpha(20),
+        foregroundColor: color,
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: color.withAlpha(50)),
+        ),
+        elevation: 0,
       ),
     );
   }

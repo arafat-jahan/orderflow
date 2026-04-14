@@ -37,6 +37,26 @@ enum Platform {
   const Platform(this.label, this.bgColor, this.textColor);
 }
 
+@HiveType(typeId: 3)
+class Milestone extends HiveObject {
+  @HiveField(0)
+  final String title;
+  @HiveField(1)
+  bool isCompleted;
+
+  Milestone({required this.title, this.isCompleted = false});
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'isCompleted': isCompleted,
+  };
+
+  factory Milestone.fromJson(Map<String, dynamic> json) => Milestone(
+    title: json['title'],
+    isCompleted: json['isCompleted'],
+  );
+}
+
 @HiveType(typeId: 0)
 class Order extends HiveObject {
   @HiveField(0)
@@ -57,6 +77,8 @@ class Order extends HiveObject {
   final String notes;
   @HiveField(8)
   final DateTime createdAt;
+  @HiveField(9)
+  List<Milestone> milestones;
 
   Order({
     required this.id,
@@ -68,7 +90,19 @@ class Order extends HiveObject {
     required this.status,
     this.notes = '',
     required this.createdAt,
-  });
+    List<Milestone>? milestones,
+  }) : milestones = milestones ?? [
+    Milestone(title: 'Started'),
+    Milestone(title: 'Working'),
+    Milestone(title: 'Review'),
+    Milestone(title: 'Final'),
+  ];
+
+  double get progress {
+    if (milestones.isEmpty) return 0.0;
+    final completedCount = milestones.where((m) => m.isCompleted).length;
+    return completedCount / milestones.length;
+  }
 
   Order copyWith({
     String? title,
@@ -78,6 +112,7 @@ class Order extends HiveObject {
     DateTime? deadline,
     OrderStatus? status,
     String? notes,
+    List<Milestone>? milestones,
   }) {
     return Order(
       id: this.id,
@@ -89,6 +124,39 @@ class Order extends HiveObject {
       status: status ?? this.status,
       notes: notes ?? this.notes,
       createdAt: this.createdAt,
+      milestones: milestones ?? this.milestones,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'title': title,
+      'clientName': clientName,
+      'platform': platform.index,
+      'price': price,
+      'deadline': deadline.toIso8601String(),
+      'status': status.index,
+      'notes': notes,
+      'createdAt': createdAt.toIso8601String(),
+      'milestones': milestones.map((m) => m.toJson()).toList(),
+    };
+  }
+
+  factory Order.fromJson(Map<String, dynamic> json) {
+    return Order(
+      id: json['id'],
+      title: json['title'],
+      clientName: json['clientName'],
+      platform: Platform.values[json['platform']],
+      price: json['price'],
+      deadline: DateTime.parse(json['deadline']),
+      status: OrderStatus.values[json['status']],
+      notes: json['notes'] ?? '',
+      createdAt: DateTime.parse(json['createdAt']),
+      milestones: (json['milestones'] as List?)
+          ?.map((m) => Milestone.fromJson(m))
+          .toList(),
     );
   }
 }

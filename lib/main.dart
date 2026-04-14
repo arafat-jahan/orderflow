@@ -4,6 +4,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:orderflow/core/models/order.dart';
+import 'package:orderflow/core/models/client_profile.dart';
 import 'package:orderflow/features/orders/orders_screen.dart';
 
 void main() async {
@@ -22,11 +23,13 @@ void main() async {
   Hive.registerAdapter(OrderStatusAdapter());
   Hive.registerAdapter(PlatformAdapter());
   Hive.registerAdapter(OrderAdapter());
+  Hive.registerAdapter(ClientProfileAdapter());
   
   // Open Boxes
   await Hive.openBox<Order>('orders');
   await Hive.openBox('settings');
   await Hive.openBox('proposals');
+  await Hive.openBox<ClientProfile>('client_profiles');
   
   runApp(const MyApp());
 }
